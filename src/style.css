@@ -6,4 +6,4 @@
 .advanced-photo summary{font-size:12px;font-weight:700;color:#a65a70;cursor:pointer}
 .icon-button[hidden]{display:none}
 .admin-row.guest-confirmed{border-color:#a9d8ba;background:#f1fbf4}.admin-row.guest-confirmed strong,.admin-row.guest-confirmed small{color:#287044}.admin-row.guest-confirmed strong:before{content:'✓';display:inline-grid;place-items:center;width:17px;height:17px;margin-right:6px;border-radius:50%;background:#3d9860;color:#fff;font-size:10px}
-.invitation-line{font-size:23px;line-height:1.05;max-width:330px;margin:7px auto -1px}
+.invitation-line{font-size:23px;line-height:1.05;max-width:330px;margin:7px auto -1px}.invitation-line+h1{margin-top:12px}
