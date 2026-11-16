@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#f9e9e8" />
+    <meta name="description" content="Um convite especial para celebrar o primeiro aniversário da Laura." />
+    <title>Laura faz 1 aninho · Convite</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Great+Vibes&family=Playfair+Display:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/src/style.css" />
+    <link rel="icon" href="/images/laura-princesa.png" />
+  </head>
+  <body>
+    <div id="app">
+      <div class="floating-sparkles" aria-hidden="true"><span>✦</span><span>✧</span><span>✦</span><span>✧</span></div>
+      <header class="topbar"><div class="brand"><span class="brand-crown">♛</span><span>Laura <em>faz 1</em></span></div><button class="icon-button" id="admin-open" aria-label="Abrir área da família" title="Área da família">⚙</button></header>
+      <main>
+        <section class="hero" id="inicio">
+          <div class="hero-glow"></div>
+          <p class="eyebrow hero-eyebrow">Um convite muito especial</p>
+          <div class="portrait-wrap"><span class="portrait-stars" aria-hidden="true">✧ ✦ ✧</span><img src="/images/laura-princesa.png" alt="Ilustração da Laura vestida de princesa" class="portrait" /></div>
+          <div class="hero-copy"><p class="script-small">Era uma vez uma princesa...</p><h1>Laura</h1><p class="hero-subtitle">faz <strong>1 aninho!</strong></p><div class="divider"><span>✦</span></div><p class="hero-description">Você é nosso convidado especial para celebrar esse dia cheio de amor, encanto e alegria.</p></div>
+          <a href="#confirmar" class="button button-primary hero-cta">Confirmar presença <span>↗</span></a>
+          <p class="scroll-hint">Deslize para descobrir a magia <span>↓</span></p>
+        </section>
+
+        <section class="section countdown-section" id="contagem"><div class="section-ornament">✧</div><p class="eyebrow">Falta pouquinho para a magia acontecer</p><h2>Contando os dias...</h2><div id="countdown" class="countdown" aria-live="off"><div><strong>--</strong><span>dias</span></div><div><strong>--</strong><span>horas</span></div><div><strong>--</strong><span>minutos</span></div><div><strong>--</strong><span>segundos</span></div></div><p class="event-date" id="event-date">28 de fevereiro · 15h</p></section>
+
+        <section class="section details-section" id="detalhes"><div class="section-heading"><p class="eyebrow">Anote na agenda</p><h2>O grande dia</h2><p>Preparamos tudo com muito carinho para viver esse momento com você.</p></div><div class="details-card"><div class="detail-icon">♛</div><div><span class="detail-label">Quando</span><strong id="detail-date">28 de fevereiro de 2027</strong><small id="detail-time">A partir das 15h</small></div></div><div class="details-card"><div class="detail-icon">⌖</div><div><span class="detail-label">Onde</span><strong id="detail-venue">Salão de Festas 2</strong><small id="detail-address">Rua Presidente João Goulart, 585</small></div></div><a class="text-link" id="map-link" href="https://www.google.com/maps/search/?api=1&query=Rua%20Presidente%20Jo%C3%A3o%20Goulart%2C%20585" target="_blank" rel="noopener noreferrer">Como chegar <span>↗</span></a></section>
+
+        <section class="section rsvp-section" id="confirmar"><div class="rsvp-card"><span class="card-crown">♛</span><p class="eyebrow">Sua presença é o melhor presente</p><h2>Você vem celebrar com a gente?</h2><p id="invite-message">Abra o link pessoal enviado pela família para confirmar sua presença.</p><div id="rsvp-controls" class="rsvp-controls"></div><p class="rsvp-note" id="rsvp-note"></p></div></section>
+
+        <section class="section gifts-section" id="presentes"><div class="section-heading"><p class="eyebrow">Um carinho para a Laura</p><h2>Lista de presentes</h2><p>Se quiser nos mimar, escolha um presente da lista. A sua presença já nos deixa felizes!</p></div><div id="gift-list" class="gift-list"></div><p class="section-footnote">Ao escolher, o presente fica reservado para você.</p></section>
+
+        <section class="section gallery-section" id="album"><div class="section-heading"><p class="eyebrow">Momentos de amor</p><h2>Álbum da Laura</h2><p>Um pedacinho da nossa princesa e de tudo que vivemos até aqui.</p></div><div id="photo-grid" class="photo-grid"></div><button class="text-link gallery-more" id="gallery-more" hidden>Ver todas as fotos <span>↗</span></button></section>
+
+        <section class="closing"><span class="closing-sparkle">✦</span><p>Esperamos você para escrever esse conto de fadas com a gente!</p><strong>Com carinho, família da Laura ♡</strong><a href="#inicio">Voltar ao começo ↑</a></section>
+      </main>
+      <nav class="bottom-nav" aria-label="Navegação"><a href="#inicio"><span>♛</span>Início</a><a href="#detalhes"><span>◷</span>Detalhes</a><a href="#confirmar"><span>♡</span>Confirmar</a><a href="#presentes"><span>✧</span>Presentes</a></nav>
+    </div>
+
+    <dialog id="admin-dialog" class="admin-dialog"><div class="admin-shell"><div class="admin-head"><div><span class="eyebrow">Área da família</span><h2>Painel da Laura</h2></div><button class="icon-button" id="admin-close" aria-label="Fechar painel">×</button></div><div id="admin-content"></div></div></dialog>
+    <dialog id="lightbox" class="lightbox"><button id="lightbox-close" aria-label="Fechar foto">×</button><img id="lightbox-image" alt="" /><p id="lightbox-caption"></p></dialog>
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
