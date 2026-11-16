@@ -7,7 +7,7 @@ const STORAGE_KEY = 'laura-party-v1';
 const pageParams = new URLSearchParams(location.search);
 const inviteToken = pageParams.get('convite');
 const familyAccess = pageParams.has('familia');
-const previewOnly = () => mode === 'local' && location.protocol !== 'file:' && !['localhost', '127.0.0.1'].includes(location.hostname);
+const previewOnly = () => mode === 'offline';
 const $ = (selector) => document.querySelector(selector);
 const esc = (value = '') => String(value).replace(/[&<>"']/g, char => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' })[char]);
 const safeUrl = (value) => { if (/^data:image\/(?:jpeg|png|webp);base64,/i.test(value)) return value; try { const u = new URL(value, location.href); return ['http:', 'https:', 'file:'].includes(u.protocol) ? u.href : ''; } catch { return ''; } };
@@ -35,15 +35,17 @@ async function api(action, body, adminScope = false) {
 function useLocal() { mode = 'local'; state = { ...initialLocal(), ...(localRead() || {}) }; state.guest = state.guests.find(g => g.id === inviteToken) || null; }
 async function loadPublic() {
   try { const result = await api(); mode = 'cloud'; state = { ...state, ...result }; }
-  catch { useLocal(); }
+  catch { if (location.protocol === 'file:' || ['localhost', '127.0.0.1'].includes(location.hostname)) useLocal(); else { mode = 'offline'; state = { ...initialLocal(), guest:null }; } }
   renderPublic();
 }
 async function loadAdmin() {
   if (mode === 'local') { admin = true; renderAdmin(); return; }
+  if (mode === 'offline') { admin = false; renderAdmin(); return; }
   try { const result = await api('', undefined, true); state = { ...state, ...result }; admin = true; renderAdmin(); }
   catch { admin = false; renderAdmin(); }
 }
 async function mutate(action, payload = {}) {
+  if (mode === 'offline') throw new Error('Painel indisponível. Confira a configuração do servidor.');
   if (mode === 'cloud') { const result = await api(action, payload); state = { ...state, ...result }; if (admin) await loadAdmin(); else renderPublic(); return result; }
   const data = localRead() || initialLocal();
   const id = () => crypto.randomUUID();
@@ -131,6 +133,7 @@ async function uploadPhoto(file, caption) {
 }
 function renderAdmin() {
   const box = $('#admin-content');
+  if (mode === 'offline') { box.innerHTML = '<div class="admin-banner">O painel está indisponível. Configure as variáveis do Redis e de acesso na Vercel e faça um novo deploy.</div>'; return; }
   if (!admin) { box.innerHTML = `<div class="login-box"><h3>Bem-vindo à área da família</h3><p class="admin-hint">Entre com seu usuário e senha para editar o convite.</p><form id="login-form" class="admin-form"><label>Usuário<input name="username" required autocomplete="username" autocapitalize="none" spellcheck="false"></label><label>Senha<input type="password" name="password" required autocomplete="current-password"></label><button class="button button-primary">Entrar</button></form></div>`; return; }
   const tabs = [['guests','Convidados'],['gifts','Presentes'],['photos','Álbum'],['settings','Evento']];
   box.innerHTML = `${mode === 'local' ? '<div class="admin-banner">Modo local: as alterações ficam apenas neste navegador. Para compartilhar dados entre convidados, configure o banco no deploy.</div>' : '<div class="admin-banner success">Dados compartilhados estão ativos.</div>'}<div class="admin-tabs">${tabs.map(([id,label]) => `<button data-tab="${id}" class="${activeTab === id ? 'active' : ''}">${label}</button>`).join('')}</div><div class="admin-panel">${adminPanel()}</div><div class="admin-toolbar"><span class="admin-hint">${mode === 'local' ? 'Prévia local' : 'Painel protegido'}</span>${mode === 'cloud' ? '<button id="admin-logout">Sair</button>' : ''}</div>`;
