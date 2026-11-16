@@ -9,8 +9,8 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Great+Vibes&family=Playfair+Display:wght@400;500;600;700&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="/src/style.css" />
-    <link rel="icon" href="/images/laura-princesa.png" />
+    <link rel="stylesheet" href="./src/style.css" />
+    <link rel="icon" href="./images/laura-princesa.png" />
   </head>
   <body>
     <div id="app">
@@ -20,7 +20,7 @@
         <section class="hero" id="inicio">
           <div class="hero-glow"></div>
           <p class="eyebrow hero-eyebrow">Um convite muito especial</p>
-          <div class="portrait-wrap"><span class="portrait-stars" aria-hidden="true">✧ ✦ ✧</span><img src="/images/laura-princesa.png" alt="Ilustração da Laura vestida de princesa" class="portrait" /></div>
+          <div class="portrait-wrap"><span class="portrait-stars" aria-hidden="true">✧ ✦ ✧</span><img src="./images/laura-princesa.png" alt="Ilustração da Laura vestida de princesa" class="portrait" /></div>
           <div class="hero-copy"><p class="script-small">Era uma vez uma princesa...</p><h1>Laura</h1><p class="hero-subtitle">faz <strong>1 aninho!</strong></p><div class="divider"><span>✦</span></div><p class="hero-description">Você é nosso convidado especial para celebrar esse dia cheio de amor, encanto e alegria.</p></div>
           <a href="#confirmar" class="button button-primary hero-cta">Confirmar presença <span>↗</span></a>
           <p class="scroll-hint">Deslize para descobrir a magia <span>↓</span></p>
@@ -44,6 +44,6 @@
     <dialog id="admin-dialog" class="admin-dialog"><div class="admin-shell"><div class="admin-head"><div><span class="eyebrow">Área da família</span><h2>Painel da Laura</h2></div><button class="icon-button" id="admin-close" aria-label="Fechar painel">×</button></div><div id="admin-content"></div></div></dialog>
     <dialog id="lightbox" class="lightbox"><button id="lightbox-close" aria-label="Fechar foto">×</button><img id="lightbox-image" alt="" /><p id="lightbox-caption"></p></dialog>
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
-    <script type="module" src="/src/main.js"></script>
+    <script defer src="./src/main.js"></script>
   </body>
 </html>

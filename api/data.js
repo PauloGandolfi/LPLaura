@@ -2,14 +2,14 @@ import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 
 const DEFAULT_SETTINGS = { date: '2027-02-28T15:00:00-03:00', venue: 'Salão de Festas 2', address: 'Rua Presidente João Goulart, 585', mapUrl: 'https://www.google.com/maps/search/?api=1&query=Rua%20Presidente%20Jo%C3%A3o%20Goulart%2C%20585' };
 const DEFAULT_PHOTOS = [
-  { id:'laura-art', url:'/images/laura-princesa.png', caption:'Nossa pequena princesa' },
-  { id:'laura-invite', url:'/images/convite-laura.png', caption:'O convite da Laura' }
+  { id:'laura-art', url:'./images/laura-princesa.png', caption:'Nossa pequena princesa' },
+  { id:'laura-invite', url:'./images/convite-laura.png', caption:'O convite da Laura' }
 ];
 const PREFIX = 'lplaura:v1:';
 const KEY = { guests:PREFIX+'guests', gifts:PREFIX+'gifts', photos:PREFIX+'photos', settings:PREFIX+'settings' };
 const fail = (res, status, error) => res.status(status).json({ error });
 const text = (value, max) => String(value || '').trim().slice(0,max);
-const validUrl = (value) => { try { const u = new URL(value, 'https://laura.local'); return ['http:', 'https:'].includes(u.protocol) && (value.startsWith('/') || /^https?:\/\//i.test(value)); } catch { return false; } };
+const validUrl = (value) => { try { const u = new URL(value, 'https://laura.local'); return ['http:', 'https:'].includes(u.protocol) && (value.startsWith('./images/') || value.startsWith('/images/') || /^https?:\/\//i.test(value)); } catch { return false; } };
 async function redis(...args) {
   const response = await fetch(process.env.UPSTASH_REDIS_REST_URL, { method:'POST', headers:{ Authorization:`Bearer ${process.env.UPSTASH_REDIS_REST_TOKEN}`, 'Content-Type':'application/json' }, body:JSON.stringify(args) });
   if (!response.ok) throw new Error('Falha no banco de dados');
