@@ -4,7 +4,9 @@ const DEFAULT_PHOTOS = [
   { id: 'laura-invite', url: './images/convite-laura.png', caption: 'O convite da Laura' }
 ];
 const STORAGE_KEY = 'laura-party-v1';
-const inviteToken = new URLSearchParams(location.search).get('convite');
+const pageParams = new URLSearchParams(location.search);
+const inviteToken = pageParams.get('convite');
+const familyAccess = pageParams.has('familia');
 const previewOnly = () => mode === 'local' && location.protocol !== 'file:' && !['localhost', '127.0.0.1'].includes(location.hostname);
 const $ = (selector) => document.querySelector(selector);
 const esc = (value = '') => String(value).replace(/[&<>"']/g, char => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' })[char]);
@@ -129,7 +131,7 @@ async function uploadPhoto(file, caption) {
 }
 function renderAdmin() {
   const box = $('#admin-content');
-  if (!admin) { box.innerHTML = `<div class="login-box"><h3>Bem-vindo à área da família</h3><p class="admin-hint">Entre com a senha de administrador para editar o convite.</p><form id="login-form" class="admin-form"><label>Senha<input type="password" name="password" required autocomplete="current-password"></label><button class="button button-primary">Entrar</button></form></div>`; return; }
+  if (!admin) { box.innerHTML = `<div class="login-box"><h3>Bem-vindo à área da família</h3><p class="admin-hint">Entre com seu usuário e senha para editar o convite.</p><form id="login-form" class="admin-form"><label>Usuário<input name="username" required autocomplete="username" autocapitalize="none" spellcheck="false"></label><label>Senha<input type="password" name="password" required autocomplete="current-password"></label><button class="button button-primary">Entrar</button></form></div>`; return; }
   const tabs = [['guests','Convidados'],['gifts','Presentes'],['photos','Álbum'],['settings','Evento']];
   box.innerHTML = `${mode === 'local' ? '<div class="admin-banner">Modo local: as alterações ficam apenas neste navegador. Para compartilhar dados entre convidados, configure o banco no deploy.</div>' : '<div class="admin-banner success">Dados compartilhados estão ativos.</div>'}<div class="admin-tabs">${tabs.map(([id,label]) => `<button data-tab="${id}" class="${activeTab === id ? 'active' : ''}">${label}</button>`).join('')}</div><div class="admin-panel">${adminPanel()}</div><div class="admin-toolbar"><span class="admin-hint">${mode === 'local' ? 'Prévia local' : 'Painel protegido'}</span>${mode === 'cloud' ? '<button id="admin-logout">Sair</button>' : ''}</div>`;
 }
@@ -162,7 +164,7 @@ document.addEventListener('click', async event => {
 document.addEventListener('submit', async event => {
   event.preventDefault(); const form = event.target; const data = Object.fromEntries(new FormData(form));
   try {
-    if (form.id === 'login-form') { await api('login',{ password:data.password }); await loadAdmin(); toast('Bem-vindo!'); }
+    if (form.id === 'login-form') { await api('login',{ username:data.username.trim(), password:data.password }); await loadAdmin(); toast('Bem-vinda!'); }
     else if (form.id === 'guest-form') { await mutate('addGuest',{ name:data.name }); toast('Convidado adicionado!'); }
     else if (form.id === 'gift-form') { await mutate('addGift',{ name:data.name, note:data.note }); toast('Presente adicionado!'); }
     else if (form.id === 'photo-form') { const button=form.querySelector('button'); button.disabled=true; button.textContent='Enviando foto...'; await uploadPhoto(form.elements.file.files[0], data.caption?.trim() || 'Laura'); toast('Foto publicada no álbum!'); }
@@ -170,4 +172,11 @@ document.addEventListener('submit', async event => {
     else if (form.id === 'settings-form') { const settings = { date: `${data.date}:00-03:00`, venue:data.venue.trim(), address:data.address.trim(), mapUrl:data.mapUrl.trim() }; await mutate('settings',{ settings }); toast('Informações atualizadas!'); }
   } catch (error) { toast(error.message || 'Não foi possível salvar.'); const button=form.querySelector('button'); if (button) { button.disabled=false; if (form.id === 'photo-form') button.textContent='+ Publicar foto'; } }
 });
-loadPublic(); setInterval(renderCountdown, 1000);
+if (familyAccess) $('#admin-open').hidden = false;
+loadPublic().then(async () => {
+  if (familyAccess) {
+    $('#admin-dialog').showModal();
+    await loadAdmin();
+  }
+});
+setInterval(renderCountdown, 1000);

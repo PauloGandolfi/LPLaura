@@ -41,7 +41,18 @@ export default async function handler(req,res) {
     if (req.method==='GET') { const admin=req.query.scope==='admin'; if (admin && !isAdmin(req)) return fail(res,401,'Entre com a senha de administrador.'); return res.status(200).json(await snapshot(token,admin)); }
     if (req.method!=='POST') return fail(res,405,'Método não permitido.');
     const body=req.body || {};
-    if (action==='login') { if (!equalPassword(body.password)) return fail(res,401,'Senha incorreta.'); const expiry=String(Date.now()+7*86400000); sendCookie(res,`${expiry}.${signature(expiry)}`,604800); return res.status(200).json({ ok:true }); }
+    if (action==='login') {
+      const ip=String(req.headers['x-forwarded-for'] || req.headers['x-real-ip'] || req.socket?.remoteAddress || 'unknown').split(',')[0].trim();
+      const attemptKey=PREFIX+'login:'+signature(ip);
+      const attempts=Number(await redis('INCR',attemptKey));
+      if (attempts===1) await redis('EXPIRE',attemptKey,900);
+      if (attempts>10) return fail(res,429,'Muitas tentativas. Aguarde 15 minutos.');
+      if (text(body.username,80).toLowerCase() !== (process.env.ADMIN_USERNAME || 'luana').toLowerCase() || !equalPassword(body.password)) return fail(res,401,'Usuário ou senha incorretos.');
+      await redis('DEL',attemptKey);
+      const expiry=String(Date.now()+7*86400000);
+      sendCookie(res,`${expiry}.${signature(expiry)}`,604800);
+      return res.status(200).json({ ok:true });
+    }
     if (action==='logout') { sendCookie(res,'',0); return res.status(200).json({ ok:true }); }
     if (action==='rsvp') { const guest=await one(KEY.guests,token); if (!guest) return fail(res,404,'Convite não encontrado.'); if (!['yes','no'].includes(body.status)) return fail(res,400,'Resposta inválida.'); guest.status=body.status; await redis('HSET',KEY.guests,token,JSON.stringify(guest)); return res.status(200).json(await snapshot(token,false)); }
     if (action==='reserveGift') { if (!await one(KEY.guests,token)) return fail(res,404,'Abra seu convite pessoal.'); const gift=await one(KEY.gifts,text(body.id,100)); if (!gift) return fail(res,404,'Presente não encontrado.'); const reserved=await redis('SET',PREFIX+'reserve:'+gift.id,token,'NX'); if (reserved !== 'OK') return fail(res,409,'Este presente já foi escolhido.'); gift.reservedBy=token; await redis('HSET',KEY.gifts,gift.id,JSON.stringify(gift)); return res.status(200).json(await snapshot(token,false)); }
