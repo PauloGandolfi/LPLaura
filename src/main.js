@@ -8,7 +8,7 @@ const inviteToken = new URLSearchParams(location.search).get('convite');
 const previewOnly = () => mode === 'local' && location.protocol !== 'file:' && !['localhost', '127.0.0.1'].includes(location.hostname);
 const $ = (selector) => document.querySelector(selector);
 const esc = (value = '') => String(value).replace(/[&<>"']/g, char => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' })[char]);
-const safeUrl = (value) => { try { const u = new URL(value, location.href); return ['http:', 'https:', 'file:'].includes(u.protocol) ? u.href : ''; } catch { return ''; } };
+const safeUrl = (value) => { if (/^data:image\/(?:jpeg|png|webp);base64,/i.test(value)) return value; try { const u = new URL(value, location.href); return ['http:', 'https:', 'file:'].includes(u.protocol) ? u.href : ''; } catch { return ''; } };
 const localRead = () => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || null; } catch { return null; } };
 const localWrite = (data) => localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
 const initialLocal = () => ({ settings: DEFAULT_SETTINGS, guests: [], gifts: [], photos: DEFAULT_PHOTOS });
@@ -95,6 +95,38 @@ function renderPhotos() {
   $('#photo-grid').innerHTML = visible.map(p => `<button data-photo="${esc(p.id)}" aria-label="Abrir foto: ${esc(p.caption)}"><img src="${esc(safeUrl(p.url))}" alt="${esc(p.caption)}" loading="lazy"></button>`).join('');
   $('#gallery-more').hidden = photos.length <= 5; $('#gallery-more').textContent = allPhotos ? 'Mostrar menos ↑' : 'Ver todas as fotos ↗';
 }
+function prepareImage(file) {
+  return new Promise((resolve, reject) => {
+    if (!file || !file.type.startsWith('image/')) return reject(new Error('Escolha uma imagem da galeria.'));
+    const objectUrl = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const max = 1600;
+        const scale = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.round(img.naturalWidth * scale);
+        canvas.height = Math.round(img.naturalHeight * scale);
+        canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+        const dataUrl = canvas.toDataURL('image/jpeg', .82);
+        URL.revokeObjectURL(objectUrl);
+        if (dataUrl.length > 3_500_000) return reject(new Error('A foto ficou grande demais. Escolha outra imagem.'));
+        resolve(dataUrl);
+      } catch { URL.revokeObjectURL(objectUrl); reject(new Error('Não foi possível preparar a foto.')); }
+    };
+    img.onerror = () => { URL.revokeObjectURL(objectUrl); reject(new Error('Formato de imagem não suportado neste navegador.')); };
+    img.src = objectUrl;
+  });
+}
+async function uploadPhoto(file, caption) {
+  const dataUrl = await prepareImage(file);
+  if (mode === 'local') return mutate('addPhoto', { url:dataUrl, caption });
+  const response = await fetch('/api/upload', { method:'POST', credentials:'same-origin', headers:{ 'Content-Type':'application/json' }, body:JSON.stringify({ image:dataUrl.split(',')[1], caption }) });
+  const result = await response.json();
+  if (!response.ok) throw new Error(result.error || 'Falha no envio da foto.');
+  await loadAdmin(); renderPublic();
+  return result;
+}
 function renderAdmin() {
   const box = $('#admin-content');
   if (!admin) { box.innerHTML = `<div class="login-box"><h3>Bem-vindo à área da família</h3><p class="admin-hint">Entre com a senha de administrador para editar o convite.</p><form id="login-form" class="admin-form"><label>Senha<input type="password" name="password" required autocomplete="current-password"></label><button class="button button-primary">Entrar</button></form></div>`; return; }
@@ -104,7 +136,7 @@ function renderAdmin() {
 function adminPanel() {
   if (activeTab === 'guests') return `<h3>Lista de convidados</h3><p>Adicione uma pessoa por convite. Copie o link individual para enviar.</p><form id="guest-form" class="admin-form"><label>Nome do convidado<input name="name" required maxlength="80" placeholder="Ex.: Maria e família"></label><button class="button button-primary">+ Adicionar convidado</button></form>${state.guests.length ? state.guests.map(g => `<div class="admin-row"><div class="admin-row-text"><strong>${esc(g.name)}</strong><small>${g.status === 'yes' ? '✓ Confirmou presença' : g.status === 'no' ? '✕ Não poderá ir' : 'Aguardando resposta'}</small></div><button data-copy="${esc(g.id)}">Copiar link</button><button class="danger" data-delete-guest="${esc(g.id)}" aria-label="Excluir ${esc(g.name)}">×</button></div>`).join('') : '<div class="empty-state">Nenhum convidado adicionado ainda.</div>'}`;
   if (activeTab === 'gifts') return `<h3>Lista de presentes</h3><p>Os convidados podem escolher um item disponível no link pessoal.</p><form id="gift-form" class="admin-form"><label>Presente<input name="name" required maxlength="100" placeholder="Ex.: Livros infantis"></label><label>Detalhes (opcional)<input name="note" maxlength="180" placeholder="Tamanho, cor ou sugestão"></label><button class="button button-primary">+ Adicionar presente</button></form>${state.gifts.length ? state.gifts.map(g => `<div class="admin-row"><div class="admin-row-text"><strong>${esc(g.name)}</strong><small>${esc(g.note || '')}${g.reservedBy ? ' · Reservado' : ' · Disponível'}</small></div><button class="danger" data-delete-gift="${esc(g.id)}">Excluir</button></div>`).join('') : '<div class="empty-state">A lista está vazia.</div>'}`;
-  if (activeTab === 'photos') return `<h3>Álbum de fotos</h3><p>Adicione fotos por endereço de imagem. Para fotos próprias, coloque os arquivos em <code>images</code> e use <code>./images/nome.jpg</code>.</p><form id="photo-form" class="admin-form"><label>Endereço da imagem<input name="url" required placeholder="./images/foto-laura.jpg ou https://..."></label><label>Legenda<input name="caption" maxlength="100" placeholder="Um momento especial"></label><button class="button button-primary">+ Adicionar foto</button></form>${state.photos.map(p => `<div class="admin-row"><div class="admin-row-text"><strong>${esc(p.caption)}</strong><small>${esc(p.url)}</small></div>${mode === 'cloud' && p.id.startsWith('laura-') ? '' : `<button class="danger" data-delete-photo="${esc(p.id)}">Excluir</button>`}</div>`).join('')}`;
+  if (activeTab === 'photos') return `<h3>Álbum de fotos</h3><p>Escolha uma foto do celular. Ela será preparada e publicada no álbum.</p><form id="photo-form" class="admin-form"><label>Foto<input type="file" name="file" accept="image/*" required></label><label>Legenda<input name="caption" maxlength="100" placeholder="Um momento especial"></label><button class="button button-primary">+ Publicar foto</button></form><details class="advanced-photo"><summary>Adicionar por link</summary><form id="photo-link-form" class="admin-form"><label>Endereço da imagem<input name="url" required placeholder="https://... ou ./images/foto.jpg"></label><label>Legenda<input name="caption" maxlength="100" placeholder="Um momento especial"></label><button class="button button-outline">Adicionar link</button></form></details>${state.photos.map(p => `<div class="admin-row"><div class="admin-row-text"><strong>${esc(p.caption)}</strong><small>${p.url.startsWith('data:') ? 'Foto salva neste navegador' : esc(p.url)}</small></div>${mode === 'cloud' && p.id.startsWith('laura-') ? '' : `<button class="danger" data-delete-photo="${esc(p.id)}">Excluir</button>`}</div>`).join('')}`;
   const s = state.settings; const localDate = new Date(s.date); const dateValue = Number.isNaN(localDate.getTime()) ? '' : new Intl.DateTimeFormat('sv-SE', { timeZone:'America/Sao_Paulo', year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' }).format(localDate).replace(' ', 'T');
   return `<h3>Informações da festa</h3><p>Confira a data e o endereço antes de enviar os convites.</p><form id="settings-form" class="admin-form"><label>Data e horário<input type="datetime-local" name="date" value="${esc(dateValue)}" required></label><label>Nome do local<input name="venue" value="${esc(s.venue)}" required></label><label>Endereço<input name="address" value="${esc(s.address)}" required></label><label>Link do mapa (opcional)<input name="mapUrl" value="${esc(s.mapUrl)}"></label><button class="button button-primary">Salvar evento</button></form>`;
 }
@@ -133,8 +165,9 @@ document.addEventListener('submit', async event => {
     if (form.id === 'login-form') { await api('login',{ password:data.password }); await loadAdmin(); toast('Bem-vindo!'); }
     else if (form.id === 'guest-form') { await mutate('addGuest',{ name:data.name }); toast('Convidado adicionado!'); }
     else if (form.id === 'gift-form') { await mutate('addGift',{ name:data.name, note:data.note }); toast('Presente adicionado!'); }
-    else if (form.id === 'photo-form') { if (!safeUrl(data.url)) throw new Error('Use uma URL de imagem válida.'); await mutate('addPhoto',{ url:data.url, caption:data.caption }); toast('Foto adicionada!'); }
+    else if (form.id === 'photo-form') { const button=form.querySelector('button'); button.disabled=true; button.textContent='Enviando foto...'; await uploadPhoto(form.elements.file.files[0], data.caption?.trim() || 'Laura'); toast('Foto publicada no álbum!'); }
+    else if (form.id === 'photo-link-form') { if (!safeUrl(data.url)) throw new Error('Use uma URL de imagem válida.'); await mutate('addPhoto',{ url:data.url, caption:data.caption }); toast('Foto adicionada!'); }
     else if (form.id === 'settings-form') { const settings = { date: `${data.date}:00-03:00`, venue:data.venue.trim(), address:data.address.trim(), mapUrl:data.mapUrl.trim() }; await mutate('settings',{ settings }); toast('Informações atualizadas!'); }
-  } catch (error) { toast(error.message || 'Não foi possível salvar.'); }
+  } catch (error) { toast(error.message || 'Não foi possível salvar.'); const button=form.querySelector('button'); if (button) { button.disabled=false; if (form.id === 'photo-form') button.textContent='+ Publicar foto'; } }
 });
 loadPublic(); setInterval(renderCountdown, 1000);

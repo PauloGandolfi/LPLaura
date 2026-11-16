@@ -6,11 +6,11 @@ const DEFAULT_PHOTOS = [
   { id:'laura-invite', url:'./images/convite-laura.png', caption:'O convite da Laura' }
 ];
 const PREFIX = 'lplaura:v1:';
-const KEY = { guests:PREFIX+'guests', gifts:PREFIX+'gifts', photos:PREFIX+'photos', settings:PREFIX+'settings' };
+export const KEY = { guests:PREFIX+'guests', gifts:PREFIX+'gifts', photos:PREFIX+'photos', settings:PREFIX+'settings' };
 const fail = (res, status, error) => res.status(status).json({ error });
 const text = (value, max) => String(value || '').trim().slice(0,max);
 const validUrl = (value) => { try { const u = new URL(value, 'https://laura.local'); return ['http:', 'https:'].includes(u.protocol) && (value.startsWith('./images/') || value.startsWith('/images/') || /^https?:\/\//i.test(value)); } catch { return false; } };
-async function redis(...args) {
+export async function redis(...args) {
   const response = await fetch(process.env.UPSTASH_REDIS_REST_URL, { method:'POST', headers:{ Authorization:`Bearer ${process.env.UPSTASH_REDIS_REST_TOKEN}`, 'Content-Type':'application/json' }, body:JSON.stringify(args) });
   if (!response.ok) throw new Error('Falha no banco de dados');
   const data = await response.json();
@@ -23,7 +23,7 @@ async function one(key,id) { const raw=await redis('HGET',key,id); return raw ? 
 async function settings() { const raw=await redis('GET',KEY.settings); return raw ? parse(raw) || DEFAULT_SETTINGS : DEFAULT_SETTINGS; }
 function cookie(req,name) { return (req.headers.cookie || '').split(';').map(s=>s.trim()).find(s=>s.startsWith(name+'='))?.slice(name.length+1); }
 function signature(value) { return createHmac('sha256',process.env.SESSION_SECRET).update(value).digest('hex'); }
-function isAdmin(req) { const token=cookie(req,'laura_admin'); if (!token) return false; const [expiry,sig]=token.split('.'); if (!expiry || !sig || Number(expiry)<Date.now()) return false; const expected=signature(expiry); const a=Buffer.from(sig,'hex'), b=Buffer.from(expected,'hex'); return a.length===b.length && timingSafeEqual(a,b); }
+export function isAdmin(req) { const token=cookie(req,'laura_admin'); if (!token) return false; const [expiry,sig]=token.split('.'); if (!expiry || !sig || Number(expiry)<Date.now()) return false; const expected=signature(expiry); const a=Buffer.from(sig,'hex'), b=Buffer.from(expected,'hex'); return a.length===b.length && timingSafeEqual(a,b); }
 function sendCookie(res,value,maxAge) { res.setHeader('Set-Cookie',`laura_admin=${value}; HttpOnly; Secure; SameSite=Lax; Path=/api; Max-Age=${maxAge}`); }
 function equalPassword(input) { const a=Buffer.from(String(input||'')), b=Buffer.from(process.env.ADMIN_PASSWORD||''); return a.length===b.length && timingSafeEqual(a,b); }
 function cleanGift(g,token,admin) { return { ...g, reservedBy:admin ? g.reservedBy : g.reservedBy ? (g.reservedBy === token ? token : 'reserved') : null }; }
@@ -52,7 +52,7 @@ export default async function handler(req,res) {
     else if (action==='addGift') { const name=text(body.name,100); if (!name) return fail(res,400,'Informe o presente.'); const gift={id:randomUUID(),name,note:text(body.note,180),reservedBy:null}; await redis('HSET',KEY.gifts,gift.id,JSON.stringify(gift)); }
     else if (action==='deleteGift') { const id=text(body.id,100); await redis('HDEL',KEY.gifts,id); await redis('DEL',PREFIX+'reserve:'+id); }
     else if (action==='addPhoto') { const url=text(body.url,1000); if (!validUrl(url)) return fail(res,400,'Endereço de imagem inválido.'); const photo={id:randomUUID(),url,caption:text(body.caption,100)||'Laura'}; await redis('HSET',KEY.photos,photo.id,JSON.stringify(photo)); }
-    else if (action==='deletePhoto') { const id=text(body.id,100); if (DEFAULT_PHOTOS.some(p=>p.id===id)) return fail(res,400,'As imagens iniciais fazem parte do site.'); await redis('HDEL',KEY.photos,id); }
+    else if (action==='deletePhoto') { const id=text(body.id,100); if (DEFAULT_PHOTOS.some(p=>p.id===id)) return fail(res,400,'As imagens iniciais fazem parte do site.'); const photo=await one(KEY.photos,id); if (photo?.url && photo.url.includes('.blob.vercel-storage.com/')) { const {del}=await import('@vercel/blob'); await del(photo.url); } await redis('HDEL',KEY.photos,id); }
     else if (action==='settings') { const s=body.settings||{}; if (Number.isNaN(new Date(s.date).getTime()) || !text(s.venue,120) || !text(s.address,180)) return fail(res,400,'Confira data, local e endereço.'); if (s.mapUrl && !validUrl(s.mapUrl)) return fail(res,400,'Link do mapa inválido.'); await redis('SET',KEY.settings,JSON.stringify({date:s.date,venue:text(s.venue,120),address:text(s.address,180),mapUrl:text(s.mapUrl,1000)})); }
     else return fail(res,400,'Ação desconhecida.');
     return res.status(200).json(await snapshot(token,true));
