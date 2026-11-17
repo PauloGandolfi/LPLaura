@@ -4,6 +4,8 @@ const DEFAULT_PHOTOS = [
   { id: 'laura-invite', url: './images/convite-laura.png', caption: 'O convite da Laura' }
 ];
 const STORAGE_KEY = 'laura-party-v1';
+const ALLOWED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
+const MAX_IMAGE_FILE_SIZE = 20 * 1024 * 1024;
 const pageParams = new URLSearchParams(location.search);
 const inviteToken = pageParams.get('convite');
 const familyAccess = pageParams.has('familia');
@@ -101,7 +103,8 @@ function renderPhotos() {
 }
 function prepareImage(file) {
   return new Promise((resolve, reject) => {
-    if (!file || !file.type.startsWith('image/')) return reject(new Error('Escolha uma imagem da galeria.'));
+    if (!file || !ALLOWED_IMAGE_TYPES.has(file.type)) return reject(new Error('Escolha uma imagem JPEG, PNG ou WebP.'));
+    if (file.size > MAX_IMAGE_FILE_SIZE) return reject(new Error('A imagem deve ter no máximo 20 MB.'));
     const objectUrl = URL.createObjectURL(file);
     const img = new Image();
     img.onload = () => {
@@ -126,7 +129,12 @@ async function uploadPhoto(file, caption) {
   const dataUrl = await prepareImage(file);
   if (mode === 'local') return mutate('addPhoto', { url:dataUrl, caption });
   const response = await fetch('/api/upload', { method:'POST', credentials:'same-origin', headers:{ 'Content-Type':'application/json' }, body:JSON.stringify({ image:dataUrl.split(',')[1], caption }) });
-  const result = await response.json();
+  let result;
+  try { result = await response.json(); }
+  catch {
+    if (response.status === 413) throw new Error('A imagem ficou grande demais para enviar. Escolha uma imagem menor.');
+    throw new Error('Não foi possível concluir o envio. Verifique sua conexão e tente novamente.');
+  }
   if (!response.ok) throw new Error(result.error || 'Falha no envio da foto.');
   if (!result.photo?.id || !result.photo?.url) throw new Error('A foto foi enviada, mas o servidor não confirmou o salvamento.');
   state.photos = [...(state.photos || []), result.photo];
@@ -144,7 +152,7 @@ function renderAdmin() {
 function adminPanel() {
   if (activeTab === 'guests') return `<h3>Lista de convidados</h3><p>Adicione uma pessoa por convite. Copie o link individual para enviar.</p><form id="guest-form" class="admin-form"><label>Nome do convidado<input name="name" required maxlength="80" placeholder="Ex.: Maria e família"></label><button class="button button-primary">+ Adicionar convidado</button></form>${state.guests.length ? state.guests.map(g => `<div class="admin-row ${g.status === 'yes' ? 'guest-confirmed' : ''}"><div class="admin-row-text"><strong>${esc(g.name)}</strong><small>${g.status === 'yes' ? '✓ Confirmou presença' : g.status === 'no' ? '✕ Não poderá ir' : 'Aguardando resposta'}</small></div><button data-copy="${esc(g.id)}">Copiar link</button><button class="danger" data-delete-guest="${esc(g.id)}" aria-label="Excluir ${esc(g.name)}">×</button></div>`).join('') : '<div class="empty-state">Nenhum convidado adicionado ainda.</div>'}`;
   if (activeTab === 'gifts') return `<h3>Lista de presentes</h3><p>Os convidados podem escolher um item disponível no link pessoal.</p><form id="gift-form" class="admin-form"><label>Presente<input name="name" required maxlength="100" placeholder="Ex.: Livros infantis"></label><label>Detalhes (opcional)<input name="note" maxlength="180" placeholder="Tamanho, cor ou sugestão"></label><button class="button button-primary">+ Adicionar presente</button></form>${state.gifts.length ? state.gifts.map(g => `<div class="admin-row"><div class="admin-row-text"><strong>${esc(g.name)}</strong><small>${esc(g.note || '')}${g.reservedBy ? ' · Reservado' : ' · Disponível'}</small></div><button class="danger" data-delete-gift="${esc(g.id)}">Excluir</button></div>`).join('') : '<div class="empty-state">A lista está vazia.</div>'}`;
-  if (activeTab === 'photos') return `<h3>Álbum de fotos</h3><p>Escolha uma foto do celular. Ela será preparada e publicada no álbum.</p><form id="photo-form" class="admin-form"><label>Foto<input type="file" name="file" accept="image/*" required></label><label>Legenda<input name="caption" maxlength="100" placeholder="Um momento especial"></label><button class="button button-primary">+ Publicar foto</button></form><details class="advanced-photo"><summary>Adicionar por link</summary><form id="photo-link-form" class="admin-form"><label>Endereço da imagem<input name="url" required placeholder="https://... ou ./images/foto.jpg"></label><label>Legenda<input name="caption" maxlength="100" placeholder="Um momento especial"></label><button class="button button-outline">Adicionar link</button></form></details>${state.photos.map(p => `<div class="admin-row"><div class="admin-row-text"><strong>${esc(p.caption)}</strong><small>${p.url.startsWith('data:') ? 'Foto salva neste navegador' : esc(p.url)}</small></div>${mode === 'cloud' && p.id.startsWith('laura-') ? '' : `<button class="danger" data-delete-photo="${esc(p.id)}">Excluir</button>`}</div>`).join('')}`;
+  if (activeTab === 'photos') return `<h3>Álbum de fotos</h3><p>Escolha uma imagem JPEG, PNG ou WebP de até 20 MB. Ela será preparada e publicada no álbum.</p><form id="photo-form" class="admin-form"><label>Foto<input type="file" name="file" accept="image/jpeg,image/png,image/webp" required></label><label>Legenda<input name="caption" maxlength="100" placeholder="Um momento especial"></label><button class="button button-primary">+ Publicar foto</button></form><details class="advanced-photo"><summary>Adicionar por link</summary><form id="photo-link-form" class="admin-form"><label>Endereço da imagem<input name="url" required placeholder="https://... ou ./images/foto.jpg"></label><label>Legenda<input name="caption" maxlength="100" placeholder="Um momento especial"></label><button class="button button-outline">Adicionar link</button></form></details>${state.photos.map(p => `<div class="admin-row"><div class="admin-row-text"><strong>${esc(p.caption)}</strong><small>${p.url.startsWith('data:') ? 'Foto salva neste navegador' : esc(p.url)}</small></div>${mode === 'cloud' && p.id.startsWith('laura-') ? '' : `<button class="danger" data-delete-photo="${esc(p.id)}">Excluir</button>`}</div>`).join('')}`;
   const s = state.settings; const localDate = new Date(s.date); const dateValue = Number.isNaN(localDate.getTime()) ? '' : new Intl.DateTimeFormat('sv-SE', { timeZone:'America/Sao_Paulo', year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' }).format(localDate).replace(' ', 'T');
   return `<h3>Informações da festa</h3><p>Confira a data e o endereço antes de enviar os convites.</p><form id="settings-form" class="admin-form"><label>Data e horário<input type="datetime-local" name="date" value="${esc(dateValue)}" required></label><label>Nome do local<input name="venue" value="${esc(s.venue)}" required></label><label>Endereço<input name="address" value="${esc(s.address)}" required></label><label>Link do mapa (opcional)<input name="mapUrl" value="${esc(s.mapUrl)}"></label><button class="button button-primary">Salvar evento</button></form>`;
 }

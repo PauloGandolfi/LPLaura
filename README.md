@@ -13,9 +13,10 @@ Sem API configurada, o site entra em **modo local**. O painel abre pelo ícone d
 1. Envie esta pasta para um repositório GitHub e importe o projeto na Vercel. Selecione o preset **Other**. O `vercel.json` executa `node build.cjs` e publica a pasta `dist`.
 2. Crie um banco **Upstash Redis** e copie a REST URL e o REST Token.
 3. Em *Project Settings → Environment Variables* da Vercel, configure as variáveis de [.env.example](.env.example): `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`, `ADMIN_USERNAME`, `ADMIN_PASSWORD` e `SESSION_SECRET`. O usuário padrão no código é `luana`; a senha deve ser definida **somente** na Vercel, nunca no repositório.
-4. No projeto da Vercel, abra **Storage → Create Database → Blob**, crie um armazenamento **Public** e conecte ao projeto. O SDK usa a configuração criada pela Vercel para publicar as fotos.
-5. Use um segredo aleatório longo para `SESSION_SECRET`. Faça novo deploy depois de salvar as variáveis e conectar o Blob.
-6. Abra o painel da família, entre com a senha e revise a data, o endereço, os convidados e os presentes antes de compartilhar os links.
+4. No projeto da Vercel, abra **Storage → Create Database → Blob**, crie um armazenamento **Public** e conecte-o ao mesmo projeto usado pelo site, no ambiente **Production**, com o prefixo `BLOB`. A conexão OIDC fornece `BLOB_STORE_ID`; o SDK usa essa variável e o token da requisição no servidor. Se o store estiver usando token estático, confirme que `BLOB_READ_WRITE_TOKEN` está configurada em **Production**. Não coloque nenhuma dessas credenciais no navegador.
+5. Depois de conectar o Blob ou alterar variáveis de ambiente, faça um novo deploy de produção para que as Functions recebam as credenciais.
+6. Use um segredo aleatório longo para `SESSION_SECRET`.
+7. Abra o painel da família, entre com a senha e revise a data, o endereço, os convidados e os presentes antes de compartilhar os links.
 
 Com o Redis e o Blob configurados, convidados, confirmações, reservas, fotos enviadas do celular e dados do evento são compartilhados entre aparelhos. O painel usa cookie de sessão com assinatura e a lista completa de convidados só é enviada ao administrador. Cada convidado recebe um link com identificador único. Evite publicar esses links em locais abertos.
 
