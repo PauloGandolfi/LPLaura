@@ -128,7 +128,10 @@ async function uploadPhoto(file, caption) {
   const response = await fetch('/api/upload', { method:'POST', credentials:'same-origin', headers:{ 'Content-Type':'application/json' }, body:JSON.stringify({ image:dataUrl.split(',')[1], caption }) });
   const result = await response.json();
   if (!response.ok) throw new Error(result.error || 'Falha no envio da foto.');
-  await loadAdmin(); renderPublic();
+  if (!result.photo?.id || !result.photo?.url) throw new Error('A foto foi enviada, mas o servidor não confirmou o salvamento.');
+  state.photos = [...(state.photos || []), result.photo];
+  renderPublic();
+  if (admin) renderAdmin();
   return result;
 }
 function renderAdmin() {
