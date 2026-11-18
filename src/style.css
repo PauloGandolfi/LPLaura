@@ -9,3 +9,5 @@
 .invitation-line{font-size:23px;line-height:1.05;max-width:330px;margin:7px auto -1px}.invitation-line+h1{margin-top:12px}
 
 .guest-count-fields{display:grid;grid-template-columns:1fr 1fr;gap:10px}.guest-count-fields input{margin-top:5px}.guest-summary{display:grid;grid-template-columns:1.2fr 1fr 1fr;gap:8px;margin:17px 0 12px}.guest-summary>div{display:flex;flex-direction:column;align-items:center;gap:3px;padding:12px 5px;background:#fff;border:1px solid #efdcda;border-radius:14px}.guest-summary strong{font:600 21px 'Playfair Display',serif;color:#a85e74}.guest-summary span{font-size:9px;text-transform:uppercase;letter-spacing:.07em;color:#a1848a;text-align:center}.guest-filters{display:flex;gap:7px;margin:12px 0 15px}.guest-filters button{border:1px solid #ecd3d5;border-radius:20px;background:#fff;color:#9b6775;padding:8px 14px;font-size:11px;font-weight:700}.guest-filters button.active{background:#b8647d;color:#fff;border-color:#b8647d}
+
+.gift-store-link{flex:none;border:1px solid #be7790;border-radius:17px;padding:8px 10px;color:#9a526b;background:#fff9f8;font-size:10px;font-weight:700;text-align:center}
