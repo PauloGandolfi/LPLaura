@@ -1,3 +1,4 @@
+import { GIFT_CHANGE, giftReservations } from './gifts.js';
 import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 
 const DEFAULT_SETTINGS = { date: '2027-02-28T15:00:00-03:00', venue: 'Salão de Festas 2', address: 'Rua Presidente João Goulart, 585', mapUrl: 'https://www.google.com/maps/search/?api=1&query=Rua%20Presidente%20Jo%C3%A3o%20Goulart%2C%20585' };
@@ -26,7 +27,7 @@ function signature(value) { return createHmac('sha256',process.env.SESSION_SECRE
 export function isAdmin(req) { const token=cookie(req,'laura_admin'); if (!token) return false; const [expiry,sig]=token.split('.'); if (!expiry || !sig || Number(expiry)<Date.now()) return false; const expected=signature(expiry); const a=Buffer.from(sig,'hex'), b=Buffer.from(expected,'hex'); return a.length===b.length && timingSafeEqual(a,b); }
 function sendCookie(res,value,maxAge) { res.setHeader('Set-Cookie',`laura_admin=${value}; HttpOnly; Secure; SameSite=Lax; Path=/api; Max-Age=${maxAge}`); }
 function equalPassword(input) { const a=Buffer.from(String(input||'')), b=Buffer.from(process.env.ADMIN_PASSWORD||''); return a.length===b.length && timingSafeEqual(a,b); }
-function cleanGift(g,token,admin) { return { ...g, reservedBy:admin ? g.reservedBy : g.reservedBy ? (g.reservedBy === token ? token : 'reserved') : null }; }
+function cleanGift(g,token,admin) { const reservations=giftReservations(g); const { reservedBy, reservations: privateReservations, ...details }=g; return { ...details, quantity:g.quantity || 1, reservedCount:reservations.length, reservedByMe:!!token && reservations.includes(token), ...(admin ? { reservations } : {}) }; }
 async function snapshot(token,admin) {
   const [s,guests,gifts,photos] = await Promise.all([settings(), admin ? all(KEY.guests) : Promise.resolve([]), all(KEY.gifts), all(KEY.photos)]);
   const guest=token ? await one(KEY.guests,token) : null;
@@ -55,13 +56,32 @@ export default async function handler(req,res) {
     }
     if (action==='logout') { sendCookie(res,'',0); return res.status(200).json({ ok:true }); }
     if (action==='rsvp') { const guest=await one(KEY.guests,token); if (!guest) return fail(res,404,'Convite não encontrado.'); if (!['yes','no'].includes(body.status)) return fail(res,400,'Resposta inválida.'); guest.status=body.status; await redis('HSET',KEY.guests,token,JSON.stringify(guest)); return res.status(200).json(await snapshot(token,false)); }
-    if (action==='reserveGift') { if (!await one(KEY.guests,token)) return fail(res,404,'Abra seu convite pessoal.'); const gift=await one(KEY.gifts,text(body.id,100)); if (!gift) return fail(res,404,'Presente não encontrado.'); const reserved=await redis('SET',PREFIX+'reserve:'+gift.id,token,'NX'); if (reserved !== 'OK') return fail(res,409,'Este presente já foi escolhido.'); gift.reservedBy=token; await redis('HSET',KEY.gifts,gift.id,JSON.stringify(gift)); return res.status(200).json(await snapshot(token,false)); }
-    if (action==='unreserveGift') { const gift=await one(KEY.gifts,text(body.id,100)); if (!gift || gift.reservedBy!==token) return fail(res,403,'Reserva indisponível.'); await redis('DEL',PREFIX+'reserve:'+gift.id); gift.reservedBy=null; await redis('HSET',KEY.gifts,gift.id,JSON.stringify(gift)); return res.status(200).json(await snapshot(token,false)); }
+    if (action==='reserveGift' || action==='unreserveGift') {
+      const result=await redis('EVAL',GIFT_CHANGE,2,KEY.gifts,KEY.guests,text(body.id,100),action==='reserveGift' ? 'reserve' : 'unreserve',token);
+      if (result==='missing') return fail(res,404,'Presente não encontrado.');
+      if (result==='guest') return fail(res,404,'Abra seu convite pessoal.');
+      if (result==='full') return fail(res,409,'Todas as unidades deste presente já foram escolhidas.');
+      if (result==='forbidden') return fail(res,403,'Reserva indisponível.');
+      return res.status(200).json(await snapshot(token,false));
+    }
     if (!isAdmin(req)) return fail(res,401,'Acesso restrito à família.');
     if (action==='addGuest') { const name=text(body.name,80); const adults=Number(body.adults), children=Number(body.children); if (!name) return fail(res,400,'Informe o nome do convidado.'); if (!Number.isInteger(adults) || !Number.isInteger(children) || adults<0 || children<0 || adults+children<1 || adults>99 || children>99) return fail(res,400,'Informe quantidades válidas de adultos e crianças.'); const guest={id:randomUUID(),name,adults,children,status:'pending'}; await redis('HSET',KEY.guests,guest.id,JSON.stringify(guest)); }
     else if (action==='updateGuest') { const id=text(body.id,100); const guest=await one(KEY.guests,id); const name=text(body.name,80); const adults=Number(body.adults), children=Number(body.children); if (!guest) return fail(res,404,'Convidado não encontrado.'); if (!name) return fail(res,400,'Informe o nome do convidado.'); if (!Number.isInteger(adults) || !Number.isInteger(children) || adults<0 || children<0 || adults+children<1 || adults>99 || children>99) return fail(res,400,'Informe quantidades válidas de adultos e crianças.'); guest.name=name; guest.adults=adults; guest.children=children; await redis('HSET',KEY.guests,id,JSON.stringify(guest)); }
-    else if (action==='deleteGuest') { const id=text(body.id,100); await redis('HDEL',KEY.guests,id); const gifts=await all(KEY.gifts); for (const gift of gifts.filter(g=>g.reservedBy===id)) { gift.reservedBy=null; await redis('DEL',PREFIX+'reserve:'+gift.id); await redis('HSET',KEY.gifts,gift.id,JSON.stringify(gift)); } }
-    else if (action==='addGift') { const name=text(body.name,100), shopUrl=text(body.shopUrl,1000); if (!name) return fail(res,400,'Informe o presente.'); if (shopUrl && (!/^https?:\/\//i.test(shopUrl) || !validUrl(shopUrl))) return fail(res,400,'Link da loja inválido.'); const gift={id:randomUUID(),name,note:text(body.note,180),shopUrl,reservedBy:null}; await redis('HSET',KEY.gifts,gift.id,JSON.stringify(gift)); }
+    else if (action==='deleteGuest') { const id=text(body.id,100); await redis('HDEL',KEY.guests,id); const gifts=await all(KEY.gifts); for (const gift of gifts.filter(g=>giftReservations(g).includes(id))) { await redis('EVAL',GIFT_CHANGE,2,KEY.gifts,KEY.guests,gift.id,'unreserve',id); } }
+    else if (action==='addGift' || action==='updateGift') {
+      const name=text(body.name,100), shopUrl=text(body.shopUrl,1000), imageUrl=text(body.imageUrl,1000), quantity=Number(body.quantity ?? 1);
+      if (!name) return fail(res,400,'Informe o presente.');
+      if (!Number.isInteger(quantity) || quantity<1 || quantity>999) return fail(res,400,'Informe uma quantidade de 1 a 999.');
+      if (shopUrl && (!/^https?:\/\//i.test(shopUrl) || !validUrl(shopUrl))) return fail(res,400,'Link da loja inválido.');
+      if (imageUrl && !validUrl(imageUrl)) return fail(res,400,'Foto inválida.');
+      const details={name,note:text(body.note,180),shopUrl,imageUrl,quantity};
+      if (action==='addGift') { const gift={id:randomUUID(),...details,reservations:[]}; await redis('HSET',KEY.gifts,gift.id,JSON.stringify(gift)); }
+      else {
+        const result=await redis('EVAL',GIFT_CHANGE,2,KEY.gifts,KEY.guests,text(body.id,100),'update',JSON.stringify(details));
+        if (result==='missing') return fail(res,404,'Presente não encontrado.');
+        if (result==='quantity') return fail(res,409,'A quantidade não pode ser menor que o número de unidades reservadas.');
+      }
+    }
     else if (action==='deleteGift') { const id=text(body.id,100); await redis('HDEL',KEY.gifts,id); await redis('DEL',PREFIX+'reserve:'+id); }
     else if (action==='addPhoto') { const url=text(body.url,1000); if (!validUrl(url)) return fail(res,400,'Endereço de imagem inválido.'); const photo={id:randomUUID(),url,caption:text(body.caption,100)||'Laura'}; await redis('HSET',KEY.photos,photo.id,JSON.stringify(photo)); }
     else if (action==='deletePhoto') { const id=text(body.id,100); if (DEFAULT_PHOTOS.some(p=>p.id===id)) return fail(res,400,'As imagens iniciais fazem parte do site.'); const photo=await one(KEY.photos,id); if (photo?.url && photo.url.includes('.blob.vercel-storage.com/')) { const {del}=await import('@vercel/blob'); await del(photo.url); } await redis('HDEL',KEY.photos,id); }

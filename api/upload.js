@@ -16,6 +16,7 @@ export default async function handler(req, res) {
   let blob;
   try {
     blob = await put(`laura/fotos/${randomUUID()}.jpg`, bytes, { access:'public', contentType:'image/jpeg', addRandomSuffix:true, ...(process.env.BLOB_STORE_ID ? { storeId:process.env.BLOB_STORE_ID } : {}) });
+    if (req.body?.purpose === 'gift') return res.status(200).json({ imageUrl:blob.url });
     const photo = { id:randomUUID(), url:blob.url, caption };
     await redis('HSET', KEY.photos, photo.id, JSON.stringify(photo));
     return res.status(200).json({ photo });
