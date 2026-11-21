@@ -23,6 +23,7 @@ let state = { settings: DEFAULT_SETTINGS, guests: [], gifts: [], photos: DEFAULT
 let activeTab = 'guests';
 let guestFilter = 'all';
 let editingGuestId = null;
+let editingGiftId = null;
 let allPhotos = false;
 let toastTimer;
 
@@ -57,12 +58,13 @@ async function mutate(action, payload = {}) {
   switch (action) {
     case 'addGuest': data.guests.push({ id: id(), name: payload.name.trim(), adults: Number(payload.adults) || 0, children: Number(payload.children) || 0, status: 'pending' }); break;
     case 'updateGuest': { const g = data.guests.find(x => x.id === payload.id); if (!g) throw new Error('Convidado não encontrado.'); g.name = payload.name.trim(); g.adults = Number(payload.adults); g.children = Number(payload.children); break; }
-    case 'deleteGuest': data.guests = data.guests.filter(x => x.id !== payload.id); data.gifts = data.gifts.map(g => g.reservedBy === payload.id ? { ...g, reservedBy: null } : g); break;
+    case 'deleteGuest': data.guests = data.guests.filter(x => x.id !== payload.id); data.gifts = data.gifts.map(g => ({ ...g, reservedBy:null, reservations:giftReservations(g).filter(token => token !== payload.id) })); break;
     case 'rsvp': { const g = data.guests.find(x => x.id === inviteToken); if (!g) throw new Error('Convite não encontrado'); g.status = payload.status; break; }
-    case 'addGift': data.gifts.push({ id: id(), name: payload.name.trim(), note: payload.note?.trim() || '', shopUrl: payload.shopUrl?.trim() || '', reservedBy: null }); break;
+    case 'addGift': data.gifts.push({ ...payload, id: id(), reservations: [] }); break;
+    case 'updateGift': { const g = data.gifts.find(x => x.id === payload.id); if (!g) throw new Error('Presente não encontrado.'); if (payload.quantity < giftCount(g)) throw new Error('A quantidade não pode ser menor que o número de unidades reservadas.'); Object.assign(g, payload); break; }
     case 'deleteGift': data.gifts = data.gifts.filter(x => x.id !== payload.id); break;
-    case 'reserveGift': { const g = data.gifts.find(x => x.id === payload.id); if (!g || g.reservedBy) throw new Error('Presente indisponível'); if (!data.guests.some(x => x.id === inviteToken)) throw new Error('Abra seu convite pessoal'); g.reservedBy = inviteToken; break; }
-    case 'unreserveGift': { const g = data.gifts.find(x => x.id === payload.id); if (!g || g.reservedBy !== inviteToken) throw new Error('Reserva indisponível'); g.reservedBy = null; break; }
+    case 'reserveGift': { const g = data.gifts.find(x => x.id === payload.id); if (!g || giftCount(g) >= (g.quantity || 1)) throw new Error('Presente indisponível'); if (!data.guests.some(x => x.id === inviteToken)) throw new Error('Abra seu convite pessoal'); g.reservations = [...new Set([...giftReservations(g), inviteToken])]; g.reservedBy = null; break; }
+    case 'unreserveGift': { const g = data.gifts.find(x => x.id === payload.id); if (!g || !giftIsMine(g)) throw new Error('Reserva indisponível'); g.reservations = giftReservations(g).filter(token => token !== inviteToken); g.reservedBy = null; break; }
     case 'addPhoto': data.photos.push({ id: id(), url: payload.url.trim(), caption: payload.caption?.trim() || 'Laura' }); break;
     case 'deletePhoto': data.photos = data.photos.filter(x => x.id !== payload.id); break;
     case 'settings': data.settings = payload.settings; break;
@@ -94,10 +96,18 @@ function renderRsvp() {
   controls.innerHTML = `<button class="button ${guest.status === 'yes' ? 'button-primary' : 'button-outline'}" data-rsvp="yes">♡ Vou sim!</button><button class="button ${guest.status === 'no' ? 'button-primary' : 'button-outline'}" data-rsvp="no">Não poderei ir</button>`;
   $('#rsvp-note').textContent = guest.status === 'yes' ? 'Presença confirmada! Estamos esperando você. ♡' : guest.status === 'no' ? 'Sentiremos sua falta. Você pode mudar sua resposta aqui.' : 'Você poderá mudar sua resposta se precisar.';
 }
+function giftReservations(gift) { return Array.isArray(gift.reservations) ? gift.reservations : gift.reservedBy ? [gift.reservedBy] : []; }
+function giftCount(gift) { return gift.reservedCount ?? giftReservations(gift).length; }
+function giftIsMine(gift) { return gift.reservedByMe ?? giftReservations(gift).includes(inviteToken); }
 function renderGifts() {
   const list = $('#gift-list');
   if (!state.gifts?.length) { list.innerHTML = `<div class="empty-state"><span>🎁</span>A lista de presentes está sendo preparada com carinho. Volte em breve!</div>`; return; }
-  list.innerHTML = state.gifts.map(g => { const mine = g.reservedBy && g.reservedBy === inviteToken; const reserved = Boolean(g.reservedBy); const shopUrl = safeShopUrl(g.shopUrl); return `<article class="gift-card"><div class="gift-icon">🎁</div><div class="gift-info"><strong>${esc(g.name)}</strong><small>${esc(g.note || (reserved ? 'Já escolhido com carinho' : 'Disponível para escolher'))}</small></div>${shopUrl ? `<a class="gift-store-link" href="${esc(shopUrl)}" target="_blank" rel="noopener noreferrer">Ver na loja ↗</a>` : ''}<button data-gift="${esc(g.id)}" ${previewOnly() || !state.guest || (reserved && !mine) ? 'disabled' : ''}>${mine ? 'Desfazer' : reserved ? 'Reservado' : 'Escolher'}</button></article>`; }).join('');
+  list.innerHTML = state.gifts.map(g => {
+    const mine = giftIsMine(g), quantity = g.quantity || 1;
+    const available = Math.max(0, quantity - giftCount(g));
+    const shopUrl = safeShopUrl(g.shopUrl), imageUrl = g.imageUrl ? safeUrl(g.imageUrl) : '';
+    return `<article class="gift-card">${imageUrl ? `<img class="gift-image" src="${esc(imageUrl)}" alt="${esc(g.name)}" loading="lazy">` : '<div class="gift-icon" aria-hidden="true">🎁</div>'}<div class="gift-info"><strong>${esc(g.name)}</strong>${g.note ? `<small>${esc(g.note)}</small>` : ''}<small class="gift-availability">${available} de ${quantity} ${quantity === 1 ? 'unidade disponível' : 'unidades disponíveis'}${mine ? ' · Você reservou 1' : ''}</small></div><div class="gift-actions">${shopUrl ? `<a class="gift-store-link" href="${esc(shopUrl)}" target="_blank" rel="noopener noreferrer">Ver na loja ↗</a>` : ''}<button data-gift="${esc(g.id)}" ${previewOnly() || !state.guest || (!available && !mine) ? 'disabled' : ''}>${mine ? 'Desfazer reserva' : !available ? 'Esgotado' : 'Escolher'}</button></div></article>`;
+  }).join('');
 }
 function renderPhotos() {
   const photos = state.photos?.length ? state.photos : DEFAULT_PHOTOS;
@@ -129,6 +139,15 @@ function prepareImage(file) {
     img.src = objectUrl;
   });
 }
+async function uploadGiftImage(file) {
+  const dataUrl = await prepareImage(file);
+  if (mode === 'local') return dataUrl;
+  const response = await fetch('/api/upload', { method:'POST', credentials:'same-origin', headers:{ 'Content-Type':'application/json' }, body:JSON.stringify({ image:dataUrl.split(',')[1], purpose:'gift' }) });
+  let result;
+  try { result = await response.json(); } catch { throw new Error('Não foi possível enviar a foto. Tente uma imagem menor.'); }
+  if (!response.ok || !result.imageUrl) throw new Error(result.error || 'Falha no envio da foto.');
+  return result.imageUrl;
+}
 async function uploadPhoto(file, caption) {
   const dataUrl = await prepareImage(file);
   if (mode === 'local') return mutate('addPhoto', { url:dataUrl, caption });
@@ -155,7 +174,7 @@ function renderAdmin() {
 }
 function adminPanel() {
   if (activeTab === 'guests') {
-    const guests = state.guests || [];
+    const guests = [...(state.guests || [])].sort((a, b) => a.name.localeCompare(b.name, 'pt-BR', { sensitivity: 'base' }));
     const adults = guests.reduce((sum, g) => sum + (Number(g.adults ?? 1) || 0), 0);
     const children = guests.reduce((sum, g) => sum + (Number(g.children) || 0), 0);
     const total = adults + children;
@@ -163,7 +182,10 @@ function adminPanel() {
     const editingGuest = guests.find(g => g.id === editingGuestId);
     return `<h3>Lista de convidados</h3><p>Informe quantos adultos e crianças estão incluídos em cada convite.</p><form id="guest-form" class="admin-form"><input type="hidden" name="id" value="${esc(editingGuest?.id || '')}"><label>Nome do convidado<input name="name" required maxlength="80" placeholder="Ex.: Maria e família" value="${esc(editingGuest?.name || '')}"></label><div class="guest-count-fields"><label>Adultos<input type="number" name="adults" min="0" max="99" value="${editingGuest?.adults ?? 1}" required></label><label>Crianças<input type="number" name="children" min="0" max="99" value="${editingGuest?.children ?? 0}" required></label></div><button class="button button-primary">${editingGuest ? 'Salvar alterações' : '+ Adicionar convidado'}</button>${editingGuest ? '<button type="button" class="button button-outline" data-cancel-guest-edit>Cancelar edição</button>' : ''}</form><section class="guest-summary" aria-label="Resumo de convidados"><div><strong>${total}</strong><span>Total de pessoas</span></div><div><strong>${adults}</strong><span>Adultos</span></div><div><strong>${children}</strong><span>Crianças</span></div></section><div class="guest-filters" role="group" aria-label="Filtrar convidados">${[['all','Todos'],['adults','Adultos'],['children','Crianças']].map(([filter,label]) => `<button type="button" data-guest-filter="${filter}" class="${guestFilter === filter ? 'active' : ''}">${label}</button>`).join('')}</div>${filtered.length ? filtered.map(g => { const a = Number(g.adults ?? 1) || 0; const c = Number(g.children) || 0; return `<div class="admin-row ${g.status === 'yes' ? 'guest-confirmed' : ''}"><div class="admin-row-text"><strong>${esc(g.name)}</strong><small>${a} ${a === 1 ? 'adulto' : 'adultos'} · ${c} ${c === 1 ? 'criança' : 'crianças'} · ${g.status === 'yes' ? '✓ Confirmou presença' : g.status === 'no' ? '✕ Não poderá ir' : 'Aguardando resposta'}</small></div><button data-edit-guest="${esc(g.id)}">Editar</button><button data-copy="${esc(g.id)}">Copiar link</button><button class="danger" data-delete-guest="${esc(g.id)}" aria-label="Excluir ${esc(g.name)}">×</button></div>`; }).join('') : '<div class="empty-state">Nenhum convidado nesta categoria.</div>'}`;
   }
-  if (activeTab === 'gifts') return `<h3>Lista de presentes</h3><p>Os convidados podem escolher um item disponível no link pessoal.</p><form id="gift-form" class="admin-form"><label>Presente<input name="name" required maxlength="100" placeholder="Ex.: Livros infantis"></label><label>Detalhes (opcional)<input name="note" maxlength="180" placeholder="Tamanho, cor ou sugestão"></label><label>Link da loja (opcional)<input type="url" name="shopUrl" maxlength="1000" placeholder="https://loja.com/produto"></label><button class="button button-primary">+ Adicionar presente</button></form>${state.gifts.length ? state.gifts.map(g => `<div class="admin-row"><div class="admin-row-text"><strong>${esc(g.name)}</strong><small>${esc(g.note || '')}${g.shopUrl ? ' · Link da loja adicionado' : ''}${g.reservedBy ? ' · Reservado' : ' · Disponível'}</small></div><button class="danger" data-delete-gift="${esc(g.id)}">Excluir</button></div>`).join('') : '<div class="empty-state">A lista está vazia.</div>'}`;
+  if (activeTab === 'gifts') {
+    const editing = state.gifts.find(g => g.id === editingGiftId);
+    return `<h3>Lista de presentes</h3><p>Cada convite pode reservar uma unidade de cada presente.</p><form id="gift-form" class="admin-form"><input type="hidden" name="id" value="${esc(editing?.id || '')}"><label>Presente<input name="name" required maxlength="100" placeholder="Ex.: Livros infantis" value="${esc(editing?.name || '')}"></label><label>Quantidade<input type="number" name="quantity" min="${Math.max(1, editing ? giftCount(editing) : 0)}" max="999" step="1" required value="${editing?.quantity || 1}"></label><label>Detalhes (opcional)<input name="note" maxlength="180" placeholder="Tamanho, cor ou sugestão" value="${esc(editing?.note || '')}"></label><label>Link da loja (opcional)<input type="url" name="shopUrl" maxlength="1000" placeholder="https://loja.com/produto" value="${esc(editing?.shopUrl || '')}"></label>${editing?.imageUrl ? `<img class="gift-edit-image" src="${esc(safeUrl(editing.imageUrl))}" alt="Foto atual do presente"><label><input type="checkbox" name="removeImage"> Remover foto atual</label>` : ''}<label>${editing?.imageUrl ? 'Trocar foto' : 'Foto do presente'} (opcional)<input type="file" name="file" accept="image/jpeg,image/png,image/webp"></label><small class="admin-hint">JPEG, PNG ou WebP de até 20 MB.</small><button type="submit" class="button button-primary">${editing ? 'Salvar alterações' : '+ Adicionar presente'}</button>${editing ? '<button type="button" class="button button-outline" data-cancel-gift-edit>Cancelar edição</button>' : ''}</form>${state.gifts.length ? state.gifts.map(g => `<div class="admin-row admin-gift-row">${g.imageUrl ? `<img class="gift-edit-image" src="${esc(safeUrl(g.imageUrl))}" alt="${esc(g.name)}" loading="lazy">` : ''}<div class="admin-row-text"><strong>${esc(g.name)}</strong><small>${esc(g.note || '')}</small><small>${giftCount(g)} de ${g.quantity || 1} unidades reservadas</small></div><div class="gift-actions"><button data-edit-gift="${esc(g.id)}">Editar</button><button class="danger" data-delete-gift="${esc(g.id)}">Excluir</button></div></div>`).join('') : '<div class="empty-state">A lista está vazia.</div>'}`;
+  }
   if (activeTab === 'photos') return `<h3>Álbum de fotos</h3><p>Escolha uma imagem JPEG, PNG ou WebP de até 20 MB. Ela será preparada e publicada no álbum.</p><form id="photo-form" class="admin-form"><label>Foto<input type="file" name="file" accept="image/jpeg,image/png,image/webp" required></label><label>Legenda<input name="caption" maxlength="100" placeholder="Um momento especial"></label><button class="button button-primary">+ Publicar foto</button></form><details class="advanced-photo"><summary>Adicionar por link</summary><form id="photo-link-form" class="admin-form"><label>Endereço da imagem<input name="url" required placeholder="https://... ou ./images/foto.jpg"></label><label>Legenda<input name="caption" maxlength="100" placeholder="Um momento especial"></label><button class="button button-outline">Adicionar link</button></form></details>${state.photos.map(p => `<div class="admin-row"><div class="admin-row-text"><strong>${esc(p.caption)}</strong><small>${p.url.startsWith('data:') ? 'Foto salva neste navegador' : esc(p.url)}</small></div>${mode === 'cloud' && p.id.startsWith('laura-') ? '' : `<button class="danger" data-delete-photo="${esc(p.id)}">Excluir</button>`}</div>`).join('')}`;
   const s = state.settings; const localDate = new Date(s.date); const dateValue = Number.isNaN(localDate.getTime()) ? '' : new Intl.DateTimeFormat('sv-SE', { timeZone:'America/Sao_Paulo', year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' }).format(localDate).replace(' ', 'T');
   return `<h3>Informações da festa</h3><p>Confira a data e o endereço antes de enviar os convites.</p><form id="settings-form" class="admin-form"><label>Data e horário<input type="datetime-local" name="date" value="${esc(dateValue)}" required></label><label>Nome do local<input name="venue" value="${esc(s.venue)}" required></label><label>Endereço<input name="address" value="${esc(s.address)}" required></label><label>Link do mapa (opcional)<input name="mapUrl" value="${esc(s.mapUrl)}"></label><button class="button button-primary">Salvar evento</button></form>`;
@@ -179,7 +201,9 @@ document.addEventListener('click', async event => {
     else if (target.dataset.editGuest) { editingGuestId = target.dataset.editGuest; renderAdmin(); $('#guest-form [name="name"]').focus(); }
     else if (target.hasAttribute('data-cancel-guest-edit')) { editingGuestId = null; renderAdmin(); }
     else if (target.dataset.rsvp) { await mutate('rsvp', { status:target.dataset.rsvp }); toast('Resposta salva com carinho!'); }
-    else if (target.dataset.gift) { const gift = state.gifts.find(g => g.id === target.dataset.gift); await mutate(gift.reservedBy === inviteToken ? 'unreserveGift' : 'reserveGift', { id:gift.id }); toast(gift.reservedBy === inviteToken ? 'Reserva desfeita.' : 'Presente reservado! Obrigado ♡'); }
+    else if (target.dataset.editGift) { editingGiftId = target.dataset.editGift; renderAdmin(); $('#gift-form [name="name"]').focus(); }
+    else if (target.hasAttribute('data-cancel-gift-edit')) { editingGiftId = null; renderAdmin(); }
+    else if (target.dataset.gift) { const gift = state.gifts.find(g => g.id === target.dataset.gift); await mutate(giftIsMine(gift) ? 'unreserveGift' : 'reserveGift', { id:gift.id }); toast(giftIsMine(gift) ? 'Reserva desfeita.' : 'Presente reservado! Obrigado ♡'); }
     else if (target.dataset.photo) { const photo = state.photos.find(p => p.id === target.dataset.photo); if (photo) { $('#lightbox-image').src = safeUrl(photo.url); $('#lightbox-image').alt = photo.caption; $('#lightbox-caption').textContent = photo.caption; $('#lightbox').showModal(); } }
     else if (target.id === 'lightbox-close') $('#lightbox').close();
     else if (target.id === 'gallery-more') { allPhotos = !allPhotos; renderPhotos(); }
@@ -191,15 +215,33 @@ document.addEventListener('click', async event => {
   } catch (error) { toast(error.message || 'Algo deu errado. Tente novamente.'); }
 });
 document.addEventListener('submit', async event => {
-  event.preventDefault(); const form = event.target; const data = Object.fromEntries(new FormData(form));
+  event.preventDefault(); const form = event.target;
+  // Campos com name="id" podem sobrescrever a propriedade form.id.
+  const formId = form.getAttribute('id');
+  const data = Object.fromEntries(new FormData(form));
   try {
-    if (form.id === 'login-form') { await api('login',{ username:data.username.trim(), password:data.password }); await loadAdmin(); toast('Bem-vinda!'); }
-    else if (form.id === 'guest-form') { const adults=Number(data.adults), children=Number(data.children); if (adults + children < 1) throw new Error('Informe pelo menos um adulto ou uma criança.'); if (data.id) { await mutate('updateGuest',{ id:data.id, name:data.name, adults, children }); editingGuestId = null; renderAdmin(); toast('Convidado atualizado!'); } else { await mutate('addGuest',{ name:data.name, adults, children }); toast('Convidado adicionado!'); } }
-    else if (form.id === 'gift-form') { const shopUrl = data.shopUrl.trim(); if (shopUrl && !safeShopUrl(shopUrl)) throw new Error('Informe um link de loja válido (http ou https).'); await mutate('addGift',{ name:data.name, note:data.note, shopUrl }); toast('Presente adicionado!'); }
-    else if (form.id === 'photo-form') { const button=form.querySelector('button'); button.disabled=true; button.textContent='Enviando foto...'; await uploadPhoto(form.elements.file.files[0], data.caption?.trim() || 'Laura'); toast('Foto publicada no álbum!'); }
-    else if (form.id === 'photo-link-form') { if (!safeUrl(data.url)) throw new Error('Use uma URL de imagem válida.'); await mutate('addPhoto',{ url:data.url, caption:data.caption }); toast('Foto adicionada!'); }
-    else if (form.id === 'settings-form') { const settings = { date: `${data.date}:00-03:00`, venue:data.venue.trim(), address:data.address.trim(), mapUrl:data.mapUrl.trim() }; await mutate('settings',{ settings }); toast('Informações atualizadas!'); }
-  } catch (error) { toast(error.message || 'Não foi possível salvar.'); const button=form.querySelector('button'); if (button) { button.disabled=false; if (form.id === 'photo-form') button.textContent='+ Publicar foto'; } }
+    if (formId === 'login-form') { await api('login',{ username:data.username.trim(), password:data.password }); await loadAdmin(); toast('Bem-vinda!'); }
+    else if (formId === 'guest-form') { const adults=Number(data.adults), children=Number(data.children); if (adults + children < 1) throw new Error('Informe pelo menos um adulto ou uma criança.'); if (data.id) { await mutate('updateGuest',{ id:data.id, name:data.name, adults, children }); editingGuestId = null; renderAdmin(); toast('Convidado atualizado!'); } else { await mutate('addGuest',{ name:data.name, adults, children }); toast('Convidado adicionado!'); } }
+    else if (formId === 'gift-form') {
+      const shopUrl = data.shopUrl.trim(), quantity = Number(data.quantity);
+      if (shopUrl && !safeShopUrl(shopUrl)) throw new Error('Informe um link de loja válido (http ou https).');
+      if (!Number.isInteger(quantity) || quantity < 1 || quantity > 999) throw new Error('Informe uma quantidade de 1 a 999.');
+      const current = state.gifts.find(g => g.id === data.id);
+      if (current && quantity < giftCount(current)) throw new Error('A quantidade não pode ser menor que o número de unidades reservadas.');
+      const button = form.querySelector('button[type="submit"]');
+      if (button.disabled) return;
+      button.disabled = true; button.textContent = 'Salvando...';
+      let imageUrl = data.removeImage ? '' : current?.imageUrl || '';
+      const file = form.elements.namedItem('file').files[0];
+      if (file) imageUrl = await uploadGiftImage(file);
+      await mutate(data.id ? 'updateGift' : 'addGift', { id:data.id, name:data.name.trim(), note:data.note.trim(), shopUrl, quantity, imageUrl });
+      editingGiftId = null; renderAdmin(); renderPublic();
+      toast(data.id ? 'Presente atualizado!' : 'Presente adicionado!');
+    }
+    else if (formId === 'photo-form') { const button=form.querySelector('button'); button.disabled=true; button.textContent='Enviando foto...'; await uploadPhoto(form.elements.file.files[0], data.caption?.trim() || 'Laura'); toast('Foto publicada no álbum!'); }
+    else if (formId === 'photo-link-form') { if (!safeUrl(data.url)) throw new Error('Use uma URL de imagem válida.'); await mutate('addPhoto',{ url:data.url, caption:data.caption }); toast('Foto adicionada!'); }
+    else if (formId === 'settings-form') { const settings = { date: `${data.date}:00-03:00`, venue:data.venue.trim(), address:data.address.trim(), mapUrl:data.mapUrl.trim() }; await mutate('settings',{ settings }); toast('Informações atualizadas!'); }
+  } catch (error) { toast(error.message || 'Não foi possível salvar.'); const button=form.querySelector('button'); if (button) { button.disabled=false; if (formId === 'photo-form') button.textContent='+ Publicar foto'; if (formId === 'gift-form') button.textContent=data.id ? 'Salvar alterações' : '+ Adicionar presente'; } }
 });
 if (familyAccess) $('#admin-open').hidden = false;
 loadPublic().then(async () => {
