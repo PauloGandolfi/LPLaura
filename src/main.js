@@ -191,15 +191,18 @@ document.addEventListener('click', async event => {
   } catch (error) { toast(error.message || 'Algo deu errado. Tente novamente.'); }
 });
 document.addEventListener('submit', async event => {
-  event.preventDefault(); const form = event.target; const data = Object.fromEntries(new FormData(form));
+  event.preventDefault(); const form = event.target;
+  // Campos com name="id" podem sobrescrever a propriedade form.id.
+  const formId = form.getAttribute('id');
+  const data = Object.fromEntries(new FormData(form));
   try {
-    if (form.id === 'login-form') { await api('login',{ username:data.username.trim(), password:data.password }); await loadAdmin(); toast('Bem-vinda!'); }
-    else if (form.id === 'guest-form') { const adults=Number(data.adults), children=Number(data.children); if (adults + children < 1) throw new Error('Informe pelo menos um adulto ou uma criança.'); if (data.id) { await mutate('updateGuest',{ id:data.id, name:data.name, adults, children }); editingGuestId = null; renderAdmin(); toast('Convidado atualizado!'); } else { await mutate('addGuest',{ name:data.name, adults, children }); toast('Convidado adicionado!'); } }
-    else if (form.id === 'gift-form') { const shopUrl = data.shopUrl.trim(); if (shopUrl && !safeShopUrl(shopUrl)) throw new Error('Informe um link de loja válido (http ou https).'); await mutate('addGift',{ name:data.name, note:data.note, shopUrl }); toast('Presente adicionado!'); }
-    else if (form.id === 'photo-form') { const button=form.querySelector('button'); button.disabled=true; button.textContent='Enviando foto...'; await uploadPhoto(form.elements.file.files[0], data.caption?.trim() || 'Laura'); toast('Foto publicada no álbum!'); }
-    else if (form.id === 'photo-link-form') { if (!safeUrl(data.url)) throw new Error('Use uma URL de imagem válida.'); await mutate('addPhoto',{ url:data.url, caption:data.caption }); toast('Foto adicionada!'); }
-    else if (form.id === 'settings-form') { const settings = { date: `${data.date}:00-03:00`, venue:data.venue.trim(), address:data.address.trim(), mapUrl:data.mapUrl.trim() }; await mutate('settings',{ settings }); toast('Informações atualizadas!'); }
-  } catch (error) { toast(error.message || 'Não foi possível salvar.'); const button=form.querySelector('button'); if (button) { button.disabled=false; if (form.id === 'photo-form') button.textContent='+ Publicar foto'; } }
+    if (formId === 'login-form') { await api('login',{ username:data.username.trim(), password:data.password }); await loadAdmin(); toast('Bem-vinda!'); }
+    else if (formId === 'guest-form') { const adults=Number(data.adults), children=Number(data.children); if (adults + children < 1) throw new Error('Informe pelo menos um adulto ou uma criança.'); if (data.id) { await mutate('updateGuest',{ id:data.id, name:data.name, adults, children }); editingGuestId = null; renderAdmin(); toast('Convidado atualizado!'); } else { await mutate('addGuest',{ name:data.name, adults, children }); toast('Convidado adicionado!'); } }
+    else if (formId === 'gift-form') { const shopUrl = data.shopUrl.trim(); if (shopUrl && !safeShopUrl(shopUrl)) throw new Error('Informe um link de loja válido (http ou https).'); await mutate('addGift',{ name:data.name, note:data.note, shopUrl }); toast('Presente adicionado!'); }
+    else if (formId === 'photo-form') { const button=form.querySelector('button'); button.disabled=true; button.textContent='Enviando foto...'; await uploadPhoto(form.elements.file.files[0], data.caption?.trim() || 'Laura'); toast('Foto publicada no álbum!'); }
+    else if (formId === 'photo-link-form') { if (!safeUrl(data.url)) throw new Error('Use uma URL de imagem válida.'); await mutate('addPhoto',{ url:data.url, caption:data.caption }); toast('Foto adicionada!'); }
+    else if (formId === 'settings-form') { const settings = { date: `${data.date}:00-03:00`, venue:data.venue.trim(), address:data.address.trim(), mapUrl:data.mapUrl.trim() }; await mutate('settings',{ settings }); toast('Informações atualizadas!'); }
+  } catch (error) { toast(error.message || 'Não foi possível salvar.'); const button=form.querySelector('button'); if (button) { button.disabled=false; if (formId === 'photo-form') button.textContent='+ Publicar foto'; } }
 });
 if (familyAccess) $('#admin-open').hidden = false;
 loadPublic().then(async () => {
