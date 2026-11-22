@@ -1,3 +1,5 @@
+import { orderPhotos, validatePhotoOrder } from '../src/photos.js';
+import { membersOf, resizeGuest, answerGuest } from '../src/guests.js';
 import { GIFT_CHANGE, giftReservations } from './gifts.js';
 import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 
@@ -7,7 +9,7 @@ const DEFAULT_PHOTOS = [
   { id:'laura-invite', url:'./images/convite-laura.png', caption:'O convite da Laura' }
 ];
 const PREFIX = 'lplaura:v1:';
-export const KEY = { guests:PREFIX+'guests', gifts:PREFIX+'gifts', photos:PREFIX+'photos', settings:PREFIX+'settings' };
+export const KEY = { guests:PREFIX+'guests', gifts:PREFIX+'gifts', photos:PREFIX+'photos', photoOrder:PREFIX+'photo-order', settings:PREFIX+'settings' };
 const fail = (res, status, error) => res.status(status).json({ error });
 const text = (value, max) => String(value || '').trim().slice(0,max);
 const validUrl = (value) => { try { const u = new URL(value, 'https://laura.local'); return ['http:', 'https:'].includes(u.protocol) && (value.startsWith('./images/') || value.startsWith('/images/') || /^https?:\/\//i.test(value)); } catch { return false; } };
@@ -29,9 +31,9 @@ function sendCookie(res,value,maxAge) { res.setHeader('Set-Cookie',`laura_admin=
 function equalPassword(input) { const a=Buffer.from(String(input||'')), b=Buffer.from(process.env.ADMIN_PASSWORD||''); return a.length===b.length && timingSafeEqual(a,b); }
 function cleanGift(g,token,admin) { const reservations=giftReservations(g); const { reservedBy, reservations: privateReservations, ...details }=g; return { ...details, quantity:g.quantity || 1, reservedCount:reservations.length, reservedByMe:!!token && reservations.includes(token), ...(admin ? { reservations } : {}) }; }
 async function snapshot(token,admin) {
-  const [s,guests,gifts,photos] = await Promise.all([settings(), admin ? all(KEY.guests) : Promise.resolve([]), all(KEY.gifts), all(KEY.photos)]);
+  const [s,guests,gifts,photos,photoOrder] = await Promise.all([settings(), admin ? all(KEY.guests) : Promise.resolve([]), all(KEY.gifts), all(KEY.photos), redis('GET',KEY.photoOrder)]);
   const guest=token ? await one(KEY.guests,token) : null;
-  return { settings:s, guests, gifts:gifts.map(g=>cleanGift(g,token,admin)), photos:[...DEFAULT_PHOTOS,...photos], guest: guest ? { id:guest.id,name:guest.name,status:guest.status } : null };
+  return { settings:s, guests, gifts:gifts.map(g=>cleanGift(g,token,admin)), photos:orderPhotos([...DEFAULT_PHOTOS,...photos],parse(photoOrder)), guest: guest ? { id:guest.id,name:guest.name,status:guest.status,adults:guest.adults,children:guest.children,members:membersOf(guest) } : null };
 }
 export default async function handler(req,res) {
   res.setHeader('Cache-Control','no-store');
@@ -55,7 +57,7 @@ export default async function handler(req,res) {
       return res.status(200).json({ ok:true });
     }
     if (action==='logout') { sendCookie(res,'',0); return res.status(200).json({ ok:true }); }
-    if (action==='rsvp') { const guest=await one(KEY.guests,token); if (!guest) return fail(res,404,'Convite não encontrado.'); if (!['yes','no'].includes(body.status)) return fail(res,400,'Resposta inválida.'); guest.status=body.status; await redis('HSET',KEY.guests,token,JSON.stringify(guest)); return res.status(200).json(await snapshot(token,false)); }
+    if (action==='rsvp') { const guest=await one(KEY.guests,token); if (!guest) return fail(res,404,'Convite não encontrado.'); try { Object.assign(guest, answerGuest(guest, body.members)); } catch (error) { return fail(res,400,error.message); } await redis('HSET',KEY.guests,token,JSON.stringify(guest)); return res.status(200).json(await snapshot(token,false)); }
     if (action==='reserveGift' || action==='unreserveGift') {
       const result=await redis('EVAL',GIFT_CHANGE,2,KEY.gifts,KEY.guests,text(body.id,100),action==='reserveGift' ? 'reserve' : 'unreserve',token);
       if (result==='missing') return fail(res,404,'Presente não encontrado.');
@@ -66,7 +68,7 @@ export default async function handler(req,res) {
     }
     if (!isAdmin(req)) return fail(res,401,'Acesso restrito à família.');
     if (action==='addGuest') { const name=text(body.name,80); const adults=Number(body.adults), children=Number(body.children); if (!name) return fail(res,400,'Informe o nome do convidado.'); if (!Number.isInteger(adults) || !Number.isInteger(children) || adults<0 || children<0 || adults+children<1 || adults>99 || children>99) return fail(res,400,'Informe quantidades válidas de adultos e crianças.'); const guest={id:randomUUID(),name,adults,children,status:'pending'}; await redis('HSET',KEY.guests,guest.id,JSON.stringify(guest)); }
-    else if (action==='updateGuest') { const id=text(body.id,100); const guest=await one(KEY.guests,id); const name=text(body.name,80); const adults=Number(body.adults), children=Number(body.children); if (!guest) return fail(res,404,'Convidado não encontrado.'); if (!name) return fail(res,400,'Informe o nome do convidado.'); if (!Number.isInteger(adults) || !Number.isInteger(children) || adults<0 || children<0 || adults+children<1 || adults>99 || children>99) return fail(res,400,'Informe quantidades válidas de adultos e crianças.'); guest.name=name; guest.adults=adults; guest.children=children; await redis('HSET',KEY.guests,id,JSON.stringify(guest)); }
+    else if (action==='updateGuest') { const id=text(body.id,100); const guest=await one(KEY.guests,id); const name=text(body.name,80); const adults=Number(body.adults), children=Number(body.children); if (!guest) return fail(res,404,'Convidado não encontrado.'); if (!name) return fail(res,400,'Informe o nome do convidado.'); if (!Number.isInteger(adults) || !Number.isInteger(children) || adults<0 || children<0 || adults+children<1 || adults>99 || children>99) return fail(res,400,'Informe quantidades válidas de adultos e crianças.'); Object.assign(guest, resizeGuest(guest,adults,children), {name}); await redis('HSET',KEY.guests,id,JSON.stringify(guest)); }
     else if (action==='deleteGuest') { const id=text(body.id,100); await redis('HDEL',KEY.guests,id); const gifts=await all(KEY.gifts); for (const gift of gifts.filter(g=>giftReservations(g).includes(id))) { await redis('EVAL',GIFT_CHANGE,2,KEY.gifts,KEY.guests,gift.id,'unreserve',id); } }
     else if (action==='addGift' || action==='updateGift') {
       const name=text(body.name,100), shopUrl=text(body.shopUrl,1000), imageUrl=text(body.imageUrl,1000), quantity=Number(body.quantity ?? 1);
@@ -83,7 +85,8 @@ export default async function handler(req,res) {
       }
     }
     else if (action==='deleteGift') { const id=text(body.id,100); await redis('HDEL',KEY.gifts,id); await redis('DEL',PREFIX+'reserve:'+id); }
-    else if (action==='addPhoto') { const url=text(body.url,1000); if (!validUrl(url)) return fail(res,400,'Endereço de imagem inválido.'); const photo={id:randomUUID(),url,caption:text(body.caption,100)||'Laura'}; await redis('HSET',KEY.photos,photo.id,JSON.stringify(photo)); }
+    else if (action==='reorderPhotos') { const photos=[...DEFAULT_PHOTOS,...await all(KEY.photos)]; try { validatePhotoOrder(photos,body.ids); } catch (error) { return fail(res,409,error.message); } await redis('SET',KEY.photoOrder,JSON.stringify(body.ids)); }
+    else if (action==='addPhoto') { const url=text(body.url,1000); if (!validUrl(url)) return fail(res,400,'Endereço de imagem inválido.'); const photo={id:randomUUID(),createdAt:Date.now(),url,caption:text(body.caption,100)||'Laura'}; await redis('HSET',KEY.photos,photo.id,JSON.stringify(photo)); }
     else if (action==='deletePhoto') { const id=text(body.id,100); if (DEFAULT_PHOTOS.some(p=>p.id===id)) return fail(res,400,'As imagens iniciais fazem parte do site.'); const photo=await one(KEY.photos,id); if (photo?.url && photo.url.includes('.blob.vercel-storage.com/')) { const {del}=await import('@vercel/blob'); await del(photo.url); } await redis('HDEL',KEY.photos,id); }
     else if (action==='settings') { const s=body.settings||{}; if (Number.isNaN(new Date(s.date).getTime()) || !text(s.venue,120) || !text(s.address,180)) return fail(res,400,'Confira data, local e endereço.'); if (s.mapUrl && !validUrl(s.mapUrl)) return fail(res,400,'Link do mapa inválido.'); await redis('SET',KEY.settings,JSON.stringify({date:s.date,venue:text(s.venue,120),address:text(s.address,180),mapUrl:text(s.mapUrl,1000)})); }
     else return fail(res,400,'Ação desconhecida.');
