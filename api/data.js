@@ -1,3 +1,4 @@
+import { membersOf, resizeGuest, answerGuest } from '../src/guests.js';
 import { GIFT_CHANGE, giftReservations } from './gifts.js';
 import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 
@@ -31,7 +32,7 @@ function cleanGift(g,token,admin) { const reservations=giftReservations(g); cons
 async function snapshot(token,admin) {
   const [s,guests,gifts,photos] = await Promise.all([settings(), admin ? all(KEY.guests) : Promise.resolve([]), all(KEY.gifts), all(KEY.photos)]);
   const guest=token ? await one(KEY.guests,token) : null;
-  return { settings:s, guests, gifts:gifts.map(g=>cleanGift(g,token,admin)), photos:[...DEFAULT_PHOTOS,...photos], guest: guest ? { id:guest.id,name:guest.name,status:guest.status } : null };
+  return { settings:s, guests, gifts:gifts.map(g=>cleanGift(g,token,admin)), photos:[...DEFAULT_PHOTOS,...photos], guest: guest ? { id:guest.id,name:guest.name,status:guest.status,adults:guest.adults,children:guest.children,members:membersOf(guest) } : null };
 }
 export default async function handler(req,res) {
   res.setHeader('Cache-Control','no-store');
@@ -55,7 +56,7 @@ export default async function handler(req,res) {
       return res.status(200).json({ ok:true });
     }
     if (action==='logout') { sendCookie(res,'',0); return res.status(200).json({ ok:true }); }
-    if (action==='rsvp') { const guest=await one(KEY.guests,token); if (!guest) return fail(res,404,'Convite não encontrado.'); if (!['yes','no'].includes(body.status)) return fail(res,400,'Resposta inválida.'); guest.status=body.status; await redis('HSET',KEY.guests,token,JSON.stringify(guest)); return res.status(200).json(await snapshot(token,false)); }
+    if (action==='rsvp') { const guest=await one(KEY.guests,token); if (!guest) return fail(res,404,'Convite não encontrado.'); try { Object.assign(guest, answerGuest(guest, body.members)); } catch (error) { return fail(res,400,error.message); } await redis('HSET',KEY.guests,token,JSON.stringify(guest)); return res.status(200).json(await snapshot(token,false)); }
     if (action==='reserveGift' || action==='unreserveGift') {
       const result=await redis('EVAL',GIFT_CHANGE,2,KEY.gifts,KEY.guests,text(body.id,100),action==='reserveGift' ? 'reserve' : 'unreserve',token);
       if (result==='missing') return fail(res,404,'Presente não encontrado.');
@@ -66,7 +67,7 @@ export default async function handler(req,res) {
     }
     if (!isAdmin(req)) return fail(res,401,'Acesso restrito à família.');
     if (action==='addGuest') { const name=text(body.name,80); const adults=Number(body.adults), children=Number(body.children); if (!name) return fail(res,400,'Informe o nome do convidado.'); if (!Number.isInteger(adults) || !Number.isInteger(children) || adults<0 || children<0 || adults+children<1 || adults>99 || children>99) return fail(res,400,'Informe quantidades válidas de adultos e crianças.'); const guest={id:randomUUID(),name,adults,children,status:'pending'}; await redis('HSET',KEY.guests,guest.id,JSON.stringify(guest)); }
-    else if (action==='updateGuest') { const id=text(body.id,100); const guest=await one(KEY.guests,id); const name=text(body.name,80); const adults=Number(body.adults), children=Number(body.children); if (!guest) return fail(res,404,'Convidado não encontrado.'); if (!name) return fail(res,400,'Informe o nome do convidado.'); if (!Number.isInteger(adults) || !Number.isInteger(children) || adults<0 || children<0 || adults+children<1 || adults>99 || children>99) return fail(res,400,'Informe quantidades válidas de adultos e crianças.'); guest.name=name; guest.adults=adults; guest.children=children; await redis('HSET',KEY.guests,id,JSON.stringify(guest)); }
+    else if (action==='updateGuest') { const id=text(body.id,100); const guest=await one(KEY.guests,id); const name=text(body.name,80); const adults=Number(body.adults), children=Number(body.children); if (!guest) return fail(res,404,'Convidado não encontrado.'); if (!name) return fail(res,400,'Informe o nome do convidado.'); if (!Number.isInteger(adults) || !Number.isInteger(children) || adults<0 || children<0 || adults+children<1 || adults>99 || children>99) return fail(res,400,'Informe quantidades válidas de adultos e crianças.'); Object.assign(guest, resizeGuest(guest,adults,children), {name}); await redis('HSET',KEY.guests,id,JSON.stringify(guest)); }
     else if (action==='deleteGuest') { const id=text(body.id,100); await redis('HDEL',KEY.guests,id); const gifts=await all(KEY.gifts); for (const gift of gifts.filter(g=>giftReservations(g).includes(id))) { await redis('EVAL',GIFT_CHANGE,2,KEY.gifts,KEY.guests,gift.id,'unreserve',id); } }
     else if (action==='addGift' || action==='updateGift') {
       const name=text(body.name,100), shopUrl=text(body.shopUrl,1000), imageUrl=text(body.imageUrl,1000), quantity=Number(body.quantity ?? 1);

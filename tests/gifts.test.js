@@ -4,17 +4,19 @@ import vm from 'node:vm';
 import { readFileSync } from 'node:fs';
 import { webcrypto } from 'node:crypto';
 import handler, { KEY } from '../api/data.js';
+import * as guests from '../src/guests.js';
 
 function app(initial, token = 'guest-a') {
   let saved = JSON.stringify(initial);
   const nodes = new Map();
   const context = vm.createContext({
-    URL, URLSearchParams, crypto:webcrypto,
+    URL, URLSearchParams, crypto:webcrypto, ...guests,
     location:{ search:`?convite=${token}`, href:'http://localhost/', origin:'http://localhost' },
     localStorage:{ getItem:() => saved, setItem:(_, value) => { saved = value; } },
     document:{ addEventListener() {}, querySelector(selector) { if (!nodes.has(selector)) nodes.set(selector, {}); return nodes.get(selector); } }
   });
   let source = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
+  source = source.replace(/^import .*;\r?\n/gm, '');
   source = source.slice(0, source.indexOf("if (familyAccess) $('#admin-open')"));
   vm.runInContext(source + '\nrenderPublic = () => {}; renderAdmin = () => {}; useLocal();', context);
   return { run:code => vm.runInContext(code, context), data:() => JSON.parse(saved), nodes };
