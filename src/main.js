@@ -128,6 +128,16 @@ function renderPhotos() {
   $('#photo-grid').innerHTML = visible.map(p => `<button data-photo="${esc(p.id)}" aria-label="Abrir foto: ${esc(p.caption)}"><img src="${esc(safeUrl(p.url))}" alt="${esc(p.caption)}" loading="lazy"></button>`).join('');
   $('#gallery-more').hidden = photos.length <= 5; $('#gallery-more').textContent = allPhotos ? 'Mostrar menos ↑' : 'Ver todas as fotos ↗';
 }
+function photoOrderPanel() {
+  const photos = state.photos || [];
+  if (!photos.length) return '<div class="empty-state">Nenhuma foto no álbum.</div>';
+  return `<h4>Fotos publicadas</h4><p>Use as setas para definir a ordem exibida no álbum.</p><div class="photo-order-list">${photos.map((photo, index) => {
+    const imageUrl = safeUrl(photo.url);
+    const isDefaultCloudPhoto = mode === 'cloud' && photo.id.startsWith('laura-');
+    const photoSource = photo.url.startsWith('data:') ? 'Foto salva neste navegador' : photo.url;
+    return `<div class="admin-row photo-order-row">${imageUrl ? `<img class="photo-order-thumbnail" src="${esc(imageUrl)}" alt="" loading="lazy">` : ''}<div class="admin-row-text"><strong>${esc(photo.caption || 'Foto sem legenda')}</strong><small>${esc(photoSource)}</small></div><div class="photo-order-actions"><button type="button" data-move-photo="${esc(photo.id)}" data-position="${index - 1}" aria-label="Mover ${esc(photo.caption || 'foto')} para cima" ${index === 0 ? 'disabled' : ''}>↑</button><button type="button" data-move-photo="${esc(photo.id)}" data-position="${index + 1}" aria-label="Mover ${esc(photo.caption || 'foto')} para baixo" ${index === photos.length - 1 ? 'disabled' : ''}>↓</button>${isDefaultCloudPhoto ? '' : `<button type="button" class="danger" data-delete-photo="${esc(photo.id)}" aria-label="Excluir ${esc(photo.caption || 'foto')}">Excluir</button>`}</div></div>`;
+  }).join('')}</div>`;
+}
 function prepareImage(file) {
   return new Promise((resolve, reject) => {
     if (!file || !ALLOWED_IMAGE_TYPES.has(file.type)) return reject(new Error('Escolha uma imagem JPEG, PNG ou WebP.'));

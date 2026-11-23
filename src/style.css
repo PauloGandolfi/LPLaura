@@ -2,6 +2,7 @@
 :root{accent-color:#b8647d}
 .admin-form input[type=file]{padding:10px;background:#fffaf8;color:#805665}
 .admin-form input[type=file]::file-selector-button{border:0;border-radius:9px;padding:9px 12px;background:#f5dfe4;color:#8f5266;font-weight:700;margin-right:10px}
+.photo-order-row{align-items:center}.photo-order-thumbnail{width:54px;height:54px;flex:none;object-fit:cover;border-radius:9px;background:#f8e9e9}.photo-order-actions{display:flex;gap:5px;flex:none}.photo-order-actions button:disabled{opacity:.45;cursor:not-allowed}.photo-order-actions button.danger{white-space:nowrap}
 .advanced-photo{border-top:1px solid #efd9d8;border-bottom:1px solid #efd9d8;padding:15px 0;margin:18px 0}
 .advanced-photo summary{font-size:12px;font-weight:700;color:#a65a70;cursor:pointer}
 .icon-button[hidden]{display:none}
