@@ -38,10 +38,10 @@
 
         <section class="closing"><span class="closing-sparkle">✦</span><p>Esperamos você para escrever esse conto de fadas com a gente!</p><strong>Com carinho, família da Laura ♡</strong><a href="#inicio">Voltar ao começo ↑</a></section>
       </main>
-      <nav class="bottom-nav" id="bottom-nav" aria-label="Navegação"><a href="#inicio"><span>♛</span>Início</a><a href="#detalhes"><span>◷</span>Detalhes</a><a href="#confirmar"><span>♡</span>Confirmar</a><a href="#presentes"><span>✧</span>Presentes</a><button type="button" id="admin-open" aria-label="Abrir área da família" hidden><span>⚙</span>Família</button></nav>
+      <nav class="bottom-nav has-admin" id="bottom-nav" aria-label="Navegação"><a href="#inicio"><span>♛</span>Início</a><a href="#detalhes"><span>◷</span>Detalhes</a><a href="#confirmar"><span>♡</span>Confirmar</a><a href="#presentes"><span>✧</span>Presentes</a><button type="button" id="admin-open" aria-label="Abrir área da família"><span>⚙</span>Família</button></nav>
     </div>
 
-    <dialog id="admin-dialog" class="admin-dialog"><div class="admin-shell"><div class="admin-head"><div><span class="eyebrow">Área da família</span><h2>Painel da Laura</h2></div><button class="icon-button" id="admin-close" aria-label="Fechar painel">×</button></div><div id="admin-content"></div></div></dialog>
+    <main id="family-workspace" class="family-workspace" hidden><header class="family-workspace-head"><div><p class="eyebrow">Área da família</p><h1>Organização da festa</h1><p>Planeje os detalhes do aniversário da Laura em um só lugar.</p></div><a class="button button-outline" href="./">Ver convite ↗</a></header><div id="admin-content" class="family-workspace-content"></div></main>
     <dialog id="lightbox" class="lightbox"><button id="lightbox-close" aria-label="Fechar foto">×</button><img id="lightbox-image" alt="" /><p id="lightbox-caption"></p></dialog>
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
     <script type="module" src="./src/main.js"></script>

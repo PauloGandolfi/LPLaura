@@ -8,6 +8,9 @@ const DEFAULT_PHOTOS = [
 const STORAGE_KEY = 'laura-party-v1';
 const ALLOWED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 const MAX_IMAGE_FILE_SIZE = 20 * 1024 * 1024;
+const DEFAULT_PLANNING = { venue:{name:'',capacity:'',tables:'',chairs:'',layout:'',decoration:''}, menu:[], budget:[], shopping:[], ideas:[] };
+const MENU_CATEGORIES = ['Salgados','Comidas infantis/mais saudáveis','Doces/buffet','Mesa de doces','Bebidas'];
+const BUDGET_CATEGORIES = ['Decoração','Descartáveis','Locação','Bolo/doces','Lembrancinhas','Entretenimento','Outros'];
 const pageParams = new URLSearchParams(location.search);
 const inviteToken = pageParams.get('convite');
 const familyAccess = pageParams.has('familia');
@@ -18,15 +21,16 @@ const safeUrl = (value) => { if (/^data:image\/(?:jpeg|png|webp);base64,/i.test(
 const safeShopUrl = (value) => { try { const u = new URL(value); return ['http:', 'https:'].includes(u.protocol) ? u.href : ''; } catch { return ''; } };
 const localRead = () => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || null; } catch { return null; } };
 const localWrite = (data) => localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-const initialLocal = () => ({ settings: DEFAULT_SETTINGS, guests: [], gifts: [], photos: DEFAULT_PHOTOS });
+const initialLocal = () => ({ settings: DEFAULT_SETTINGS, guests: [], gifts: [], photos: DEFAULT_PHOTOS, planning: structuredClone(DEFAULT_PLANNING) });
 let mode = 'loading';
 let admin = false;
-let state = { settings: DEFAULT_SETTINGS, guests: [], gifts: [], photos: DEFAULT_PHOTOS, guest: null };
+let state = { settings: DEFAULT_SETTINGS, guests: [], gifts: [], photos: DEFAULT_PHOTOS, planning: structuredClone(DEFAULT_PLANNING), guest: null };
 let activeTab = 'guests';
 let guestFilter = 'all';
 let editingGuestId = null;
 let editingGiftId = null;
 let allPhotos = false;
+let editingPlanningItem = null;
 let toastTimer;
 
 function toast(message) { const el = $('#toast'); el.textContent = message; el.classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove('show'), 3400); }
@@ -69,6 +73,7 @@ async function mutate(action, payload = {}) {
     case 'unreserveGift': { const g = data.gifts.find(x => x.id === payload.id); if (!g || !giftIsMine(g)) throw new Error('Reserva indisponível'); g.reservations = giftReservations(g).filter(token => token !== inviteToken); g.reservedBy = null; break; }
     case 'addPhoto': data.photos.push({ id: id(), url: payload.url.trim(), caption: payload.caption?.trim() || 'Laura' }); break;
     case 'reorderPhotos': validatePhotoOrder(data.photos, payload.ids); data.photos = orderPhotos(data.photos, payload.ids); break;
+    case 'savePlanning': data.planning = payload.planning; break;
     case 'deletePhoto': data.photos = data.photos.filter(x => x.id !== payload.id); break;
     case 'settings': data.settings = payload.settings; break;
   }
@@ -138,6 +143,36 @@ function photoOrderPanel() {
     return `<div class="admin-row photo-order-row">${imageUrl ? `<img class="photo-order-thumbnail" src="${esc(imageUrl)}" alt="" loading="lazy">` : ''}<div class="admin-row-text"><strong>${esc(photo.caption || 'Foto sem legenda')}</strong><small>${esc(photoSource)}</small></div><div class="photo-order-actions"><button type="button" data-move-photo="${esc(photo.id)}" data-position="${index - 1}" aria-label="Mover ${esc(photo.caption || 'foto')} para cima" ${index === 0 ? 'disabled' : ''}>↑</button><button type="button" data-move-photo="${esc(photo.id)}" data-position="${index + 1}" aria-label="Mover ${esc(photo.caption || 'foto')} para baixo" ${index === photos.length - 1 ? 'disabled' : ''}>↓</button>${isDefaultCloudPhoto ? '' : `<button type="button" class="danger" data-delete-photo="${esc(photo.id)}" aria-label="Excluir ${esc(photo.caption || 'foto')}">Excluir</button>`}</div></div>`;
   }).join('')}</div>`;
 }
+const planningData = () => ({ ...structuredClone(DEFAULT_PLANNING), ...(state.planning || {}), venue:{...DEFAULT_PLANNING.venue,...(state.planning?.venue || {})} });
+const currency = value => new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'}).format(Number(value)||0);
+const itemTotal = item => (Number(item.quantity)||0) * (Number(item.unitPrice)||0);
+const itemLink = item => { const url=safeShopUrl(item.link); return url ? `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">Abrir link ↗</a>` : ''; };
+function planningItemRow(type,item,details) {
+  const done=item.done;
+  return `<article class="admin-row planner-row ${done?'is-done':''}"><div class="admin-row-text"><strong>${esc(item.name||item.title)}</strong><small>${details}</small>${item.note ? `<small>${esc(item.note)}</small>` : ''}${itemLink(item)}</div><div class="planner-actions">${type==='shopping' ? `<button type="button" data-planning-toggle="${esc(item.id)}">${done?'Reabrir':'Concluir'}</button>` : ''}<button type="button" data-planning-edit="${type}:${esc(item.id)}">Editar</button><button type="button" class="danger" data-planning-delete="${type}:${esc(item.id)}">Excluir</button></div></article>`;
+}
+function planningPanel() {
+  const p=planningData(), v=p.venue;
+  return `<h3>Planejamento da festa</h3><p>Informações do espaço, capacidade e ideias de organização.</p><form id="venue-form" class="admin-form"><label>Salão / espaço<input name="name" maxlength="120" value="${esc(v.name)}" placeholder="Nome do salão"></label><div class="planner-fields"><label>Capacidade<input name="capacity" value="${esc(v.capacity)}" placeholder="Ex.: 80 pessoas"></label><label>Mesas<input name="tables" value="${esc(v.tables)}" placeholder="Quantidade / tipo"></label><label>Cadeiras<input name="chairs" value="${esc(v.chairs)}" placeholder="Quantidade"></label></div><label>Disposição dos espaços<textarea name="layout" maxlength="3000" placeholder="Pista, mesas, buffet, área infantil...">${esc(v.layout)}</textarea></label><label>Decoração e referências<textarea name="decoration" maxlength="3000" placeholder="Paleta, tema, referências e links...">${esc(v.decoration)}</textarea></label><button class="button button-primary">Salvar planejamento</button></form>`;
+}
+function menuPanel() {
+  const p=planningData(), current=editingPlanningItem?.type==='menu' ? p.menu.find(item=>item.id===editingPlanningItem.id) : null;
+  const total=p.menu.reduce((sum,item)=>sum+itemTotal(item),0);
+  return `<h3>Menu</h3><p>Cadastre itens por categoria. Os valores são calculados pela quantidade e pelo preço unitário.</p><form id="menu-form" class="admin-form"><input type="hidden" name="id" value="${esc(current?.id||'')}"><label>Categoria<select name="category">${MENU_CATEGORIES.map(c=>`<option ${current?.category===c?'selected':''}>${esc(c)}</option>`).join('')}</select></label><label>Item<input name="name" required maxlength="140" value="${esc(current?.name||'')}" placeholder="Nome do item"></label><div class="planner-fields"><label>Quantidade<input name="quantity" type="number" min="0.01" step="any" required value="${current?.quantity??1}"></label><label>Unidade<input name="unit" required maxlength="40" value="${esc(current?.unit||'unidade')}" placeholder="kg, cento, pacote..."></label><label>Valor unitário (R$)<input name="unitPrice" type="number" min="0" step="0.01" required value="${current?.unitPrice??0}"></label></div><label>Link (opcional)<input name="link" type="url" value="${esc(current?.link||'')}" placeholder="https://..."></label><label>Observação<textarea name="note" maxlength="500">${esc(current?.note||'')}</textarea></label><button class="button button-primary">${current?'Salvar item':'Adicionar ao menu'}</button>${current?'<button type="button" class="button button-outline" data-planning-cancel>Cancelar edição</button>':''}</form><div class="planner-total"><span>Total do menu</span><strong>${currency(total)}</strong></div>${MENU_CATEGORIES.map(category=>{const items=p.menu.filter(i=>i.category===category);const subtotal=items.reduce((sum,i)=>sum+itemTotal(i),0);return `<section class="planner-group"><div class="planner-group-head"><h4>${esc(category)}</h4><strong>${currency(subtotal)}</strong></div>${items.length?items.map(i=>planningItemRow('menu',i,`${i.quantity} ${esc(i.unit)} × ${currency(i.unitPrice)} = ${currency(itemTotal(i))}`)).join(''):'<p class="admin-hint">Nenhum item cadastrado.</p>'}</section>`}).join('')}`;
+}
+function budgetPanel() {
+  const p=planningData(), current=editingPlanningItem?.type==='budget' ? p.budget.find(item=>item.id===editingPlanningItem.id) : null;
+  const totals={estimated:p.budget.reduce((s,i)=>s+itemTotal(i),0),contracted:p.budget.filter(i=>i.status==='comprado'||i.status==='pago').reduce((s,i)=>s+itemTotal(i),0),paid:p.budget.filter(i=>i.status==='pago').reduce((s,i)=>s+itemTotal(i),0),pending:p.budget.filter(i=>i.status!=='pago').reduce((s,i)=>s+itemTotal(i),0)};
+  return `<h3>Orçamento</h3><p>Acompanhe custos cotados, contratados e pagos.</p><div class="budget-summary"><div><span>Total estimado</span><strong>${currency(totals.estimated)}</strong></div><div><span>Total contratado</span><strong>${currency(totals.contracted)}</strong></div><div><span>Total pago</span><strong>${currency(totals.paid)}</strong></div><div><span>Total pendente</span><strong>${currency(totals.pending)}</strong></div></div><form id="budget-form" class="admin-form"><input type="hidden" name="id" value="${esc(current?.id||'')}"><label>Categoria<select name="category">${BUDGET_CATEGORIES.map(c=>`<option ${current?.category===c?'selected':''}>${esc(c)}</option>`).join('')}</select></label><label>Custo<input name="name" required maxlength="140" value="${esc(current?.name||'')}" placeholder="Ex.: aluguel de brinquedos"></label><div class="planner-fields"><label>Quantidade<input name="quantity" type="number" min="0.01" step="any" required value="${current?.quantity??1}"></label><label>Valor unitário (R$)<input name="unitPrice" type="number" min="0" step="0.01" required value="${current?.unitPrice??0}"></label><label>Status<select name="status">${[['cotando','Cotando'],['comprado','Comprado'],['pago','Pago']].map(([value,label])=>`<option value="${value}" ${current?.status===value?'selected':''}>${label}</option>`).join('')}</select></label></div><label>Link (opcional)<input name="link" type="url" value="${esc(current?.link||'')}" placeholder="https://..."></label><label>Observação<textarea name="note" maxlength="500">${esc(current?.note||'')}</textarea></label><button class="button button-primary">${current?'Salvar custo':'Adicionar custo'}</button>${current?'<button type="button" class="button button-outline" data-planning-cancel>Cancelar edição</button>':''}</form>${p.budget.length?p.budget.map(i=>planningItemRow('budget',i,`${esc(i.category)} · ${i.quantity} × ${currency(i.unitPrice)} = <strong>${currency(itemTotal(i))}</strong> · ${({cotando:'Cotando',comprado:'Comprado',pago:'Pago'})[i.status]||'Cotando'}`)).join(''):'<div class="empty-state">Nenhum custo cadastrado.</div>'}`;
+}
+function shoppingPanel() {
+  const p=planningData(), current=editingPlanningItem?.type==='shopping' ? p.shopping.find(item=>item.id===editingPlanningItem.id) : null;
+  return `<h3>Compras</h3><p>Uma checklist compartilhada dos itens que ainda precisamos comprar.</p><form id="shopping-form" class="admin-form"><input type="hidden" name="id" value="${esc(current?.id||'')}"><label>Item<input name="name" required maxlength="140" value="${esc(current?.name||'')}" placeholder="O que precisamos comprar?"></label><label>Link do produto (opcional)<input name="link" type="url" value="${esc(current?.link||'')}" placeholder="https://..."></label><label>Observação<textarea name="note" maxlength="500">${esc(current?.note||'')}</textarea></label><button class="button button-primary">${current?'Salvar item':'Adicionar à lista'}</button>${current?'<button type="button" class="button button-outline" data-planning-cancel>Cancelar edição</button>':''}</form>${p.shopping.length?p.shopping.map(i=>planningItemRow('shopping',i,i.done?'Concluído':'Pendente')).join(''):'<div class="empty-state">Sua lista de compras está vazia.</div>'}`;
+}
+function ideasPanel() {
+  const p=planningData(), current=editingPlanningItem?.type==='ideas' ? p.ideas.find(item=>item.id===editingPlanningItem.id) : null;
+  return `<h3>Ideias e referências</h3><p>Guarde inspirações, links e decisões que ainda estão em aberto.</p><form id="idea-form" class="admin-form"><input type="hidden" name="id" value="${esc(current?.id||'')}"><label>Ideia / referência<input name="name" required maxlength="140" value="${esc(current?.name||'')}" placeholder="Ex.: painel de balões"></label><label>Link (opcional)<input name="link" type="url" value="${esc(current?.link||'')}" placeholder="https://..."></label><label>Observação<textarea name="note" maxlength="500">${esc(current?.note||'')}</textarea></label><button class="button button-primary">${current?'Salvar referência':'Guardar ideia'}</button>${current?'<button type="button" class="button button-outline" data-planning-cancel>Cancelar edição</button>':''}</form>${p.ideas.length?p.ideas.map(i=>planningItemRow('ideas',i,'Ideia em aberto')).join(''):'<div class="empty-state">Nenhuma ideia guardada por enquanto.</div>'}`;
+}
 function prepareImage(file) {
   return new Promise((resolve, reject) => {
     if (!file || !ALLOWED_IMAGE_TYPES.has(file.type)) return reject(new Error('Escolha uma imagem JPEG, PNG ou WebP.'));
@@ -192,10 +227,15 @@ function renderAdmin() {
   const box = $('#admin-content');
   if (mode === 'offline') { box.innerHTML = '<div class="admin-banner">O painel está indisponível. Configure as variáveis do Redis e de acesso na Vercel e faça um novo deploy.</div>'; return; }
   if (!admin) { box.innerHTML = `<div class="login-box"><h3>Bem-vindo à área da família</h3><p class="admin-hint">Entre com seu usuário e senha para editar o convite.</p><form id="login-form" class="admin-form"><label>Usuário<input name="username" required autocomplete="username" autocapitalize="none" spellcheck="false"></label><label>Senha<input type="password" name="password" required autocomplete="current-password"></label><button class="button button-primary">Entrar</button></form></div>`; return; }
-  const tabs = [['guests','Convidados'],['gifts','Presentes'],['photos','Álbum'],['settings','Evento']];
+  const tabs = [['guests','Convidados'],['gifts','Presentes'],['photos','Álbum'],['settings','Evento'],['planning','Planejamento'],['menu','Menu'],['budget','Orçamento'],['shopping','Compras'],['ideas','Ideias']];
   box.innerHTML = `${mode === 'local' ? '<div class="admin-banner">Modo local: as alterações ficam apenas neste navegador. Para compartilhar dados entre convidados, configure o banco no deploy.</div>' : '<div class="admin-banner success">Dados compartilhados estão ativos.</div>'}<div class="admin-tabs">${tabs.map(([id,label]) => `<button data-tab="${id}" class="${activeTab === id ? 'active' : ''}">${label}</button>`).join('')}</div><div class="admin-panel">${adminPanel()}</div><div class="admin-toolbar"><span class="admin-hint">${mode === 'local' ? 'Prévia local' : 'Painel protegido'}</span>${mode === 'cloud' ? '<button id="admin-logout">Sair</button>' : ''}</div>`;
 }
 function adminPanel() {
+  if (activeTab === 'planning') return planningPanel();
+  if (activeTab === 'menu') return menuPanel();
+  if (activeTab === 'budget') return budgetPanel();
+  if (activeTab === 'shopping') return shoppingPanel();
+  if (activeTab === 'ideas') return ideasPanel();
   if (activeTab === 'guests') {
     const guests = [...(state.guests || [])].sort((a, b) => a.name.localeCompare(b.name, 'pt-BR', { sensitivity: 'base' }));
     const filtered = guests.filter(g => guestFilter === 'all' || (guestFilter === 'adults' ? Number(g.adults ?? 1) > 0 : Number(g.children) > 0));
@@ -214,9 +254,12 @@ function adminPanel() {
 document.addEventListener('click', async event => {
   const target = event.target.closest('button'); if (!target) return;
   try {
-    if (target.id === 'admin-open') { $('#admin-dialog').showModal(); await loadAdmin(); }
-    else if (target.id === 'admin-close') $('#admin-dialog').close();
+    if (target.id === 'admin-open') { location.href='?familia'; }
     else if (target.dataset.tab) { activeTab = target.dataset.tab; renderAdmin(); }
+    else if (target.dataset.planningEdit) { const [type,id]=target.dataset.planningEdit.split(':'); editingPlanningItem={type,id}; activeTab=type; renderAdmin(); }
+    else if (target.dataset.planningDelete) { const [type,id]=target.dataset.planningDelete.split(':'); if(confirm('Excluir este item?')) { const planning=planningData(); planning[type]=planning[type].filter(item=>item.id!==id); await mutate('savePlanning',{planning}); toast('Item excluído.'); } }
+    else if (target.dataset.planningToggle) { const planning=planningData(); const item=planning.shopping.find(row=>row.id===target.dataset.planningToggle); if(item) { item.done=!item.done; await mutate('savePlanning',{planning}); } }
+    else if (target.hasAttribute('data-planning-cancel')) { editingPlanningItem=null; renderAdmin(); }
     else if (target.dataset.guestFilter) { guestFilter = target.dataset.guestFilter; renderAdmin(); }
     else if (target.dataset.editGuest) { editingGuestId = target.dataset.editGuest; renderAdmin(); $('#guest-form [name="name"]').focus(); }
     else if (target.hasAttribute('data-cancel-guest-edit')) { editingGuestId = null; renderAdmin(); }
@@ -244,6 +287,20 @@ document.addEventListener('submit', async event => {
   try {
     if (formId === 'rsvp-form') { const members = [...form.querySelectorAll('[data-member-id]')].map(row => ({ id:row.dataset.memberId, type:row.dataset.memberType, name:row.querySelector('input').value, status:row.querySelector('select').value })); const button = form.querySelector('[type="submit"]'); button.disabled = true; try { await mutate('rsvp', { members }); toast('Respostas salvas com carinho!'); } finally { button.disabled = false; } }
     else if (formId === 'login-form') { await api('login',{ username:data.username.trim(), password:data.password }); await loadAdmin(); toast('Bem-vinda!'); }
+    else if (formId === 'venue-form') { const planning=planningData(); planning.venue={name:data.name.trim(),capacity:data.capacity.trim(),tables:data.tables.trim(),chairs:data.chairs.trim(),layout:data.layout.trim(),decoration:data.decoration.trim()}; await mutate('savePlanning',{planning}); toast('Planejamento salvo!'); }
+    else if (['menu-form','budget-form','shopping-form','idea-form'].includes(formId)) {
+      const kind={ 'menu-form':'menu','budget-form':'budget','shopping-form':'shopping','idea-form':'ideas' }[formId];
+      const planning=planningData(), id=data.id || crypto.randomUUID(), link=data.link.trim();
+      if(link && !safeShopUrl(link)) throw new Error('Informe um link válido (http ou https).');
+      let item={id,name:data.name.trim(),link,note:data.note.trim()};
+      if(kind==='menu') { const quantity=Number(data.quantity),unitPrice=Number(data.unitPrice); if(!item.name || !Number.isFinite(quantity) || quantity<=0 || !Number.isFinite(unitPrice) || unitPrice<0) throw new Error('Confira o item, a quantidade e o valor unitário.'); item={...item,category:data.category,quantity,unit:data.unit.trim(),unitPrice}; }
+      if(kind==='budget') { const quantity=Number(data.quantity),unitPrice=Number(data.unitPrice); if(!item.name || !Number.isFinite(quantity) || quantity<=0 || !Number.isFinite(unitPrice) || unitPrice<0) throw new Error('Confira o custo, a quantidade e o valor unitário.'); item={...item,category:data.category,quantity,unitPrice,status:data.status}; }
+      if(kind==='shopping' && !item.name) throw new Error('Informe o item da lista.');
+      if(kind==='ideas' && !item.name) throw new Error('Informe a ideia ou referência.');
+      const previous=planning[kind].find(row=>row.id===id);
+      if(previous) item={...previous,...item}; else planning[kind].push(item);
+      await mutate('savePlanning',{planning}); editingPlanningItem=null; renderAdmin(); toast('Alterações salvas!');
+    }
     else if (formId === 'guest-form') { const adults=Number(data.adults), children=Number(data.children); if (adults + children < 1) throw new Error('Informe pelo menos um adulto ou uma criança.'); if (data.id) { await mutate('updateGuest',{ id:data.id, name:data.name, adults, children }); editingGuestId = null; renderAdmin(); toast('Convidado atualizado!'); } else { await mutate('addGuest',{ name:data.name, adults, children }); toast('Convidado adicionado!'); } }
     else if (formId === 'gift-form') {
       const shopUrl = data.shopUrl.trim(), quantity = Number(data.quantity);
@@ -267,12 +324,11 @@ document.addEventListener('submit', async event => {
   } catch (error) { toast(error.message || 'Não foi possível salvar.'); const button=form.querySelector('button'); if (button) { button.disabled=false; if (formId === 'photo-form') button.textContent='+ Publicar foto'; if (formId === 'gift-form') button.textContent=data.id ? 'Salvar alterações' : '+ Adicionar presente'; } }
 });
 if (familyAccess) {
-  $('#admin-open').hidden = false;
-  $('#bottom-nav').classList.add('has-admin');
+  $('#app').hidden = true;
+  $('#family-workspace').hidden = false;
 }
 loadPublic().then(async () => {
   if (familyAccess) {
-    $('#admin-dialog').showModal();
     await loadAdmin();
   }
 });
