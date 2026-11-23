@@ -8,8 +8,9 @@ const DEFAULT_PHOTOS = [
   { id:'laura-art', url:'./images/laura-princesa.png', caption:'Nossa pequena princesa' },
   { id:'laura-invite', url:'./images/convite-laura.png', caption:'O convite da Laura' }
 ];
+const DEFAULT_PLANNING = { venue:{name:'',capacity:'',tables:'',chairs:'',layout:'',decoration:''}, menu:[], budget:[], shopping:[], ideas:[] };
 const PREFIX = 'lplaura:v1:';
-export const KEY = { guests:PREFIX+'guests', gifts:PREFIX+'gifts', photos:PREFIX+'photos', photoOrder:PREFIX+'photo-order', settings:PREFIX+'settings' };
+export const KEY = { guests:PREFIX+'guests', gifts:PREFIX+'gifts', photos:PREFIX+'photos', photoOrder:PREFIX+'photo-order', settings:PREFIX+'settings', planning:PREFIX+'planning' };
 const fail = (res, status, error) => res.status(status).json({ error });
 const text = (value, max) => String(value || '').trim().slice(0,max);
 const validUrl = (value) => { try { const u = new URL(value, 'https://laura.local'); return ['http:', 'https:'].includes(u.protocol) && (value.startsWith('./images/') || value.startsWith('/images/') || /^https?:\/\//i.test(value)); } catch { return false; } };
@@ -24,6 +25,24 @@ const parse = value => { try { return JSON.parse(value); } catch { return null; 
 async function all(key) { const raw = await redis('HGETALL', key); if (!raw) return []; if (Array.isArray(raw)) { const entries=[]; for (let i=1;i<raw.length;i+=2) { const item=parse(raw[i]); if(item) entries.push(item); } return entries; } return Object.values(raw).map(parse).filter(Boolean); }
 async function one(key,id) { const raw=await redis('HGET',key,id); return raw ? parse(raw) : null; }
 async function settings() { const raw=await redis('GET',KEY.settings); return raw ? parse(raw) || DEFAULT_SETTINGS : DEFAULT_SETTINGS; }
+async function planning() { const raw=await redis('GET',KEY.planning); return raw ? parse(raw) || DEFAULT_PLANNING : DEFAULT_PLANNING; }
+function cleanPlanning(value = {}) {
+  const source=value && typeof value==='object' ? value : {};
+  const venue=source.venue && typeof source.venue==='object' ? source.venue : {};
+  const items=(list,kind) => (Array.isArray(list) ? list : []).slice(0,500).map(item => {
+    const row=item && typeof item==='object' ? item : {};
+    const quantity=Number(row.quantity), unitPrice=Number(row.unitPrice);
+    const base={id:text(row.id,100)||randomUUID(),name:text(row.name,140),note:text(row.note,500),link:text(row.link,1000)};
+    if (kind==='menu') return {...base,category:text(row.category,60),quantity:Number.isFinite(quantity)&&quantity>0?Math.min(quantity,999999):1,unit:text(row.unit,40),unitPrice:Number.isFinite(unitPrice)&&unitPrice>=0?Math.min(unitPrice,99999999):0};
+    if (kind==='budget') return {...base,category:text(row.category,60),quantity:Number.isFinite(quantity)&&quantity>0?Math.min(quantity,999999):1,unitPrice:Number.isFinite(unitPrice)&&unitPrice>=0?Math.min(unitPrice,99999999):0,status:['cotando','comprado','pago'].includes(row.status)?row.status:'cotando'};
+    if (kind==='shopping') return {...base,done:!!row.done};
+    return {...base,title:text(row.title,140)};
+  }).filter(row => row.name || row.title);
+  return {
+    venue:{name:text(venue.name,120),capacity:text(venue.capacity,40),tables:text(venue.tables,40),chairs:text(venue.chairs,40),layout:text(venue.layout,3000),decoration:text(venue.decoration,3000)},
+    menu:items(source.menu,'menu'),budget:items(source.budget,'budget'),shopping:items(source.shopping,'shopping'),ideas:items(source.ideas,'ideas')
+  };
+}
 function cookie(req,name) { return (req.headers.cookie || '').split(';').map(s=>s.trim()).find(s=>s.startsWith(name+'='))?.slice(name.length+1); }
 function signature(value) { return createHmac('sha256',process.env.SESSION_SECRET).update(value).digest('hex'); }
 export function isAdmin(req) { const token=cookie(req,'laura_admin'); if (!token) return false; const [expiry,sig]=token.split('.'); if (!expiry || !sig || Number(expiry)<Date.now()) return false; const expected=signature(expiry); const a=Buffer.from(sig,'hex'), b=Buffer.from(expected,'hex'); return a.length===b.length && timingSafeEqual(a,b); }
@@ -31,9 +50,9 @@ function sendCookie(res,value,maxAge) { res.setHeader('Set-Cookie',`laura_admin=
 function equalPassword(input) { const a=Buffer.from(String(input||'')), b=Buffer.from(process.env.ADMIN_PASSWORD||''); return a.length===b.length && timingSafeEqual(a,b); }
 function cleanGift(g,token,admin) { const reservations=giftReservations(g); const { reservedBy, reservations: privateReservations, ...details }=g; return { ...details, quantity:g.quantity || 1, reservedCount:reservations.length, reservedByMe:!!token && reservations.includes(token), ...(admin ? { reservations } : {}) }; }
 async function snapshot(token,admin) {
-  const [s,guests,gifts,photos,photoOrder] = await Promise.all([settings(), admin ? all(KEY.guests) : Promise.resolve([]), all(KEY.gifts), all(KEY.photos), redis('GET',KEY.photoOrder)]);
+  const [s,guests,gifts,photos,photoOrder,plan] = await Promise.all([settings(), admin ? all(KEY.guests) : Promise.resolve([]), all(KEY.gifts), all(KEY.photos), redis('GET',KEY.photoOrder), admin ? planning() : Promise.resolve(null)]);
   const guest=token ? await one(KEY.guests,token) : null;
-  return { settings:s, guests, gifts:gifts.map(g=>cleanGift(g,token,admin)), photos:orderPhotos([...DEFAULT_PHOTOS,...photos],parse(photoOrder)), guest: guest ? { id:guest.id,name:guest.name,status:guest.status,adults:guest.adults,children:guest.children,members:membersOf(guest) } : null };
+  return { settings:s, guests, gifts:gifts.map(g=>cleanGift(g,token,admin)), photos:orderPhotos([...DEFAULT_PHOTOS,...photos],parse(photoOrder)), ...(admin?{planning:cleanPlanning(plan)}:{}), guest: guest ? { id:guest.id,name:guest.name,status:guest.status,adults:guest.adults,children:guest.children,members:membersOf(guest) } : null };
 }
 export default async function handler(req,res) {
   res.setHeader('Cache-Control','no-store');
@@ -89,6 +108,7 @@ export default async function handler(req,res) {
     else if (action==='addPhoto') { const url=text(body.url,1000); if (!validUrl(url)) return fail(res,400,'Endereço de imagem inválido.'); const photo={id:randomUUID(),createdAt:Date.now(),url,caption:text(body.caption,100)||'Laura'}; await redis('HSET',KEY.photos,photo.id,JSON.stringify(photo)); }
     else if (action==='deletePhoto') { const id=text(body.id,100); if (DEFAULT_PHOTOS.some(p=>p.id===id)) return fail(res,400,'As imagens iniciais fazem parte do site.'); const photo=await one(KEY.photos,id); if (photo?.url && photo.url.includes('.blob.vercel-storage.com/')) { const {del}=await import('@vercel/blob'); await del(photo.url); } await redis('HDEL',KEY.photos,id); }
     else if (action==='settings') { const s=body.settings||{}; if (Number.isNaN(new Date(s.date).getTime()) || !text(s.venue,120) || !text(s.address,180)) return fail(res,400,'Confira data, local e endereço.'); if (s.mapUrl && !validUrl(s.mapUrl)) return fail(res,400,'Link do mapa inválido.'); await redis('SET',KEY.settings,JSON.stringify({date:s.date,venue:text(s.venue,120),address:text(s.address,180),mapUrl:text(s.mapUrl,1000)})); }
+    else if (action==='savePlanning') { await redis('SET',KEY.planning,JSON.stringify(cleanPlanning(body.planning))); }
     else return fail(res,400,'Ação desconhecida.');
     return res.status(200).json(await snapshot(token,true));
   } catch (error) { return fail(res,500,error.message || 'Erro no servidor.'); }
