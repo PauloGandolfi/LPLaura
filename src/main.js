@@ -266,7 +266,10 @@ document.addEventListener('submit', async event => {
     else if (formId === 'settings-form') { const settings = { date: `${data.date}:00-03:00`, venue:data.venue.trim(), address:data.address.trim(), mapUrl:data.mapUrl.trim() }; await mutate('settings',{ settings }); toast('Informações atualizadas!'); }
   } catch (error) { toast(error.message || 'Não foi possível salvar.'); const button=form.querySelector('button'); if (button) { button.disabled=false; if (formId === 'photo-form') button.textContent='+ Publicar foto'; if (formId === 'gift-form') button.textContent=data.id ? 'Salvar alterações' : '+ Adicionar presente'; } }
 });
-if (familyAccess) $('#admin-open').hidden = false;
+if (familyAccess) {
+  $('#admin-open').hidden = false;
+  $('#bottom-nav').classList.add('has-admin');
+}
 loadPublic().then(async () => {
   if (familyAccess) {
     $('#admin-dialog').showModal();
